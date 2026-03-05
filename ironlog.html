@@ -791,18 +791,51 @@
   }
 
   // ─── HEALTH ───
+  function getAdjustedWaterTarget(profile, date) {
+    const p = PROFILES[profile];
+    let target = p.water || 2.5; // Base target
+    
+    // Check today's workouts for intensity
+    const wo = state.workouts?.[date] || {};
+    let totalTonnage = 0, totalExercises = 0, hasCardio = false;
+    
+    Object.keys(wo).forEach(dayKey => {
+      const session = wo[dayKey];
+      if (!session.done) return;
+      const day = WORKOUT_PLAN[dayKey];
+      if (!day) return;
+      
+      // Check if cardio day
+      if (day.title && day.title.toUpperCase().includes('CARDIO')) hasCardio = true;
+      
+      // Count exercises and tonnage
+      day.exercises.forEach(ex => {
+        totalExercises++;
+        totalTonnage += calcSessionTonnage(date, dayKey);
+      });
+    });
+    
+    // Adjust target based on intensity
+    if (hasCardio) target += 0.5; // Cardio days need more hydration
+    if (totalTonnage > 500) target += Math.min(0.5, totalTonnage / 2000); // High volume days
+    if (totalExercises > 15) target += 0.25; // High exercise count
+    
+    return Math.min(target, 5.0); // Cap at 5.0L
+  }
+
   function renderHealthChecklist(){
     const el=document.getElementById("health-checklist"); if(!el)return;
     const today=getTodayStr(), p=PROFILES[activeProfile];
     const h=state.health?.[today]||{water:0,creatine:false,aminos:false,protein:0,sleep:0};
-    const wt=p.water||2.5, pt=p.protein||120;
-    const wp=Math.min(100,Math.round((h.water/wt)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
+    const adjustedWaterTarget = getAdjustedWaterTarget(activeProfile, today);
+    const pt=p.protein||120;
+    const wp=Math.min(100,Math.round((h.water/adjustedWaterTarget)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
     const ac=PROFILES[activeProfile].color;
     const bw=state.bodyweight?.[today]||0, h_m=(p.height||175)/100, bmi=bw>0?(bw/(h_m*h_m)).toFixed(1):0;
     const bmiColor=bmi<18.5?'#5cba5c':bmi<25?'#f0c040':bmi<30?'#f97316':'#ef4444';
     const bmiStatus=bmi<18.5?'UNDERWEIGHT':bmi<25?'NORMAL':bmi<30?'OVERWEIGHT':'OBESE';
     el.innerHTML=`<div class="hg">
-      <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${wt}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
+      <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${adjustedWaterTarget.toFixed(1)}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">🧪 CREATINE</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS</button></div></div>
       <div class="hi"><div class="hl">🥩 PROTEIN</div><div class="hc"><button class="ha" onclick="adjHealth('protein',-5)">−</button><span class="hv">${h.protein}g / ${pt}g</span><button class="ha" onclick="adjHealth('protein',5)">+</button></div><div class="hbar"><div class="hbf" style="width:${pp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">😴 SLEEP</div><div class="hc"><button class="ha" onclick="adjHealth('sleep',-0.5)">−</button><span class="hv">${h.sleep.toFixed(1)}h</span><button class="ha" onclick="adjHealth('sleep',0.5)">+</button></div></div>

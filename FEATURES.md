@@ -20,7 +20,7 @@
 - [x] **Volume per muscle group chart** — instead of just total tonnage, break it down: how many sets did chest get this week vs back vs legs. Helps spot imbalances.
 - [x] **Month-over-month comparison** — "This month vs last month" card showing volume, sessions, and top PRs side by side.
 - [x] **Workout templates / programs** — save a full week as a "program". Switch programs in one tap instead of editing individual days.
-- [ ] **Hydration goal scaling** — right now it's a flat target. Should auto-adjust based on session intensity logged that day and whether it's a cardio vs weights day.
+- [x] **Hydration goal scaling** — right now it's a flat target. Should auto-adjust based on session intensity logged that day and whether it's a cardio vs weights day.
 
 ### Low Priority
 - [x] **Dark/light isn't enough — add an AMOLED black theme** — Added an `amoled` theme option that forces pure black backgrounds and removes grid noise; activates via settings button. Great for OLED phones and dark gyms.
@@ -41,6 +41,7 @@
 - [x] **Volume per muscle group chart** — Added doughnut chart to dashboard showing volume (sets) breakdown by muscle group (chest, back, shoulders, arms, legs, core). Helps identify muscle imbalances and training focus. Updated in real-time with workout data. Shows training distribution visually.
 - [x] **Month-over-month comparison** — New dashboard card comparing current month vs previous month metrics: sessions completed, total tonnage, and new PRs. Shows percentage change with color indicators (green for increase, red for decrease). Motivational feature for tracking long-term progress and identifying trends.
 - [x] **Workout templates / programs** — Save and load full workout programs via settings. Users can create templates from current plan, give them names, and quickly load them to reset/switch programs without manual editing. Useful for periodized training (e.g., Push/Pull/Legs variations). Stored in localStorage for persistence.
+- [x] **Hydration goal scaling** — Water target now automatically adjusts based on daily workout intensity. Cardio days add +0.5L, high tonnage workouts (+500kg) add 0.25-0.5L bonus, and high exercise count (15+) adds +0.25L. Target intelligently scales between base profile target and 5.0L max to ensure proper hydration on intense training days.
 
 ---
 
