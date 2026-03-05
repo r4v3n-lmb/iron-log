@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.0";
+  const APP_VERSION = "v1.0.1";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -851,7 +851,7 @@
       <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${adjustedWaterTarget.toFixed(1)}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">🧪 SUPPLEMENTS</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">CREATINE ${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS ${h.aminos?'✓ TAKEN':'NOT YET'}</button></div></div>
       <div class="hi"><div class="hl">🥩 PROTEIN</div><div class="hc"><button class="ha" onclick="adjHealth('protein',-5)">−</button><span class="hv">${h.protein}g / ${pt}g</span><button class="ha" onclick="adjHealth('protein',5)">+</button></div><div class="hbar"><div class="hbf" style="width:${pp}%;background:${ac}"></div></div></div>
-      <div class="hi"><div class="hl">😴 SLEEP</div><div class="hc"><button class="ha" onclick="adjHealth('sleep',-0.5)">−</button><span class="hv">${h.sleep.toFixed(1)}h</span><button class="ha" onclick="adjHealth('sleep',0.5)">+</button></div></div>
+      <div class="hi"><div class="hl">😴 SLEEP</div><div class="hc"><button class="ha" onclick="adjHealth('sleep',-0.1)">−</button><span class="hv">${h.sleep.toFixed(1)}h</span><button class="ha" onclick="adjHealth('sleep',0.1)">+</button></div></div>
       <div class="hi bmi-card"><div class="hl">⚖️ BMI</div><div class="hc"><span class="bmi-value" style="color:${bmiColor}">${bmi}</span></div><div class="bmi-status" style="color:${bmiColor}">${bmiStatus}</div></div>
     </div>`;
   }
