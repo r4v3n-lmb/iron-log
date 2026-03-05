@@ -1168,6 +1168,115 @@
     }, 3000);
   };
 
+  // ─── SWIPE GESTURES ───
+  window.initSwipeGestures = function() {
+    // Only enable on mobile devices
+    if (!/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+      return;
+    }
+
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchend', handleTouchEnd, { passive: false });
+  };
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchCurrentX = 0;
+  let touchCurrentY = 0;
+  let isSwiping = false;
+  let swipeElement = null;
+  let swipeThreshold = 80; // Minimum swipe distance in pixels
+
+  function handleTouchStart(e) {
+    const target = e.target.closest('.er, .er-dual');
+    if (!target) return;
+
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchCurrentX = touchStartX;
+    touchCurrentY = touchStartY;
+    isSwiping = false;
+    swipeElement = target;
+
+    // Add visual feedback class
+    target.classList.add('swiping');
+  }
+
+  function handleTouchMove(e) {
+    if (!swipeElement) return;
+
+    touchCurrentX = e.touches[0].clientX;
+    touchCurrentY = e.touches[0].clientY;
+
+    const deltaX = touchCurrentX - touchStartX;
+    const deltaY = Math.abs(touchCurrentY - touchStartY);
+
+    // Only consider horizontal swipes (prevent vertical scroll interference)
+    if (Math.abs(deltaX) > 10 && Math.abs(deltaX) > deltaY) {
+      isSwiping = true;
+      e.preventDefault(); // Prevent scrolling
+
+      // Add visual feedback
+      const translateX = Math.max(-100, Math.min(100, deltaX));
+      swipeElement.style.transform = `translateX(${translateX}px)`;
+
+      // Update CSS classes for background effects
+      swipeElement.classList.remove('swipe-done', 'swipe-skip');
+      if (deltaX < -50) {
+        swipeElement.classList.add('swipe-done');
+      } else if (deltaX > 50) {
+        swipeElement.classList.add('swipe-skip');
+      }
+    }
+  }
+
+  function handleTouchEnd(e) {
+    if (!swipeElement) return;
+
+    const deltaX = touchCurrentX - touchStartX;
+    const deltaY = Math.abs(touchCurrentY - touchStartY);
+
+    // Reset visual feedback
+    swipeElement.classList.remove('swiping', 'swipe-done', 'swipe-skip');
+    swipeElement.style.transform = '';
+
+    // Check if it's a valid swipe
+    if (isSwiping && Math.abs(deltaX) > swipeThreshold && Math.abs(deltaX) > deltaY) {
+      if (deltaX < -swipeThreshold) {
+        // Swipe left - mark as done
+        handleSwipeAction(swipeElement, 'done');
+      } else if (deltaX > swipeThreshold) {
+        // Swipe right - skip (uncheck)
+        handleSwipeAction(swipeElement, 'skip');
+      }
+    }
+
+    // Reset state
+    isSwiping = false;
+    swipeElement = null;
+  }
+
+  function handleSwipeAction(element, action) {
+    // Find the checkbox in this exercise row
+    const checkbox = element.querySelector('input[type="checkbox"]');
+    if (!checkbox) return;
+
+    if (action === 'done') {
+      // Mark as done (check the box)
+      if (!checkbox.checked) {
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } else if (action === 'skip') {
+      // Skip (uncheck the box)
+      if (checkbox.checked) {
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }
+  }
+
   window.prevMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()-1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderStats();renderCharts(); };
   window.nextMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()+1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderStats();renderCharts(); };
 
@@ -1521,6 +1630,7 @@
     document.getElementById("cii").addEventListener("change",handleCsvImport);
     document.getElementById("sto").addEventListener("click",closeSettings);
     updateLogoColor(); updateClock(); setInterval(updateClock,1000);
+    initSwipeGestures(); // Initialize swipe gestures for mobile
     renderSettingsProfiles(); loadData();
   });
 </script>
@@ -1620,6 +1730,11 @@ html.light-mode body{background-image:repeating-linear-gradient(0deg,transparent
 .er:hover{background:rgba(255,255,255,.02)}
 html.light-mode .er:hover{background:rgba(0,0,0,.02)}
 .er.done{opacity:.7}
+.er.swiping{transition:transform 0.1s ease-out, background-color 0.1s ease-out}
+.er::before{content:"";position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg, transparent 0%, rgba(46, 196, 182, 0.1) 100%);transition:width 0.2s ease-out;pointer-events:none}
+.er.swipe-done::before{width:100%}
+.er::after{content:"";position:absolute;right:0;top:0;bottom:0;width:0;background:linear-gradient(90deg, rgba(232, 93, 4, 0.1) 0%, transparent 100%);transition:width 0.2s ease-out;pointer-events:none}
+.er.swipe-skip::after{width:100%}
 .eck{width:20px;display:flex;justify-content:center;flex-shrink:0}
 .eck input{display:none}
 .ecm{width:16px;height:16px;border:1px solid var(--border);display:inline-block;background:transparent;position:relative;cursor:pointer;transition:border-color .15s,background .15s}

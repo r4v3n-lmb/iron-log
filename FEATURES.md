@@ -11,7 +11,6 @@
 ### High Priority
 - [x] **Quick-log mode** — right now opening a workout requires tapping the card, scrolling to the exercise, entering weight, entering reps, checking the box. A swipe-up "quick log" sheet on mobile that just shows: exercise name, big number pads for weight and reps, check. No scrolling.
 - [x] **Auto-fill last session's weights** — when you open a workout, pre-populate every weight field with whatever you lifted last time. One tap to confirm or override. Massive time saver mid-workout.
-- [x] **Swipe gestures on mobile** — swipe left on an exercise row to quickly mark it done, swipe right to skip it. Faster than tapping a checkbox with sweaty hands.
 - [x] **Haptic feedback** — when you check off an exercise on mobile, a short vibration (`navigator.vibrate(40)`). Tiny thing, feels satisfying. (In conjunction with haptic feedback, add it on Completing a workout and also shoot some confetti.)
 
 ### Medium Priority
@@ -37,6 +36,7 @@
 - [x] **Sleep tracker** — Added sleep logging to the health checklist with +/- buttons for hours slept. Displays sleep trend chart in dashboard showing correlation with workout performance. Simple but eye-opening data.
 - [x] **Personal records wall** — Added a dedicated section showing every PR you hold with filtering by muscle group. Shows the date achieved and how long you've held each record. Displays weight, exercise name, muscle group badge, and duration held.
 - [x] **Consistency score** — Added a 0-100 consistency score in the stats bar showing percentage of planned workouts completed over the last 4 weeks. More motivating than streaks since missing one day doesn't reset progress.
+- [x] **Swipe gestures on mobile** — Added touch gesture support for exercise rows on mobile devices. Swipe left to mark exercise as done, swipe right to uncheck/skip. Includes visual feedback with smooth animations and color indicators. Only enabled on touch devices to avoid desktop interference.
 
 ---
 
