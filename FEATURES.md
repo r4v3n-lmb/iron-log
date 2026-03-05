@@ -29,7 +29,6 @@
 - [x] **Dark/light isn't enough — add an AMOLED black theme** — Added an `amoled` theme option that forces pure black backgrounds and removes grid noise; activates via settings button. Great for OLED phones and dark gyms.
 - [x] **Muscle diagram** — Interactive muscle filter modal with 6 muscle group buttons (Chest, Back, Legs, Shoulders, Arms, Core). Tap a muscle to filter exercises and day cards by matching exercises. Exercises without matches are dimmed. Filter persists until explicitly cleared. Header button shows active filter state.
 - [x] **Onboarding flow** — first-time users see a welcome modal asking for their name, training days, and whether to start with a Push/Pull/Legs template or a blank plan. Stores name for header greeting and populates workout grid accordingly.
-- [x] **Exercise swap suggestions** — when you tap the swap button, instead of a blank text input, show a searchable list of common alternatives for that muscle group. "Can't do barbell bench? Try: dumbbell press, push-up, cable fly..."
 
 ### Completed Features
 - [x] **Quick-log mode** — Added a bottom-sheet modal with big number inputs for weight/reps, accessible via ⚡ button next to each exercise. Pre-fills with last session's weights and auto-checks when both values are entered.

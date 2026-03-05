@@ -1214,14 +1214,111 @@
     setTimeout(()=>{selectDay(key);openEdit(key);},200); toast(`✓ ${title} added`);
   };
 
+  // ─── EXERCISE DATABASE ───
+  const EXERCISE_DATABASE = {
+    chest: [
+      "Barbell Bench Press", "Smith Machine Bench", "Dumbbell Bench Press", "Incline Barbell Bench",
+      "Incline Dumbbell Press", "Decline Bench Press", "Cable Chest Fly", "Pec Deck Machine",
+      "Push-Up", "Diamond Push-Up", "Archer Push-Up", "Chest Dip", "Machine Chest Press",
+      "Butterfly Machine", "Floor Press", "Close-Grip Bench Press"
+    ],
+    back: [
+      "Deadlift", "Romanian Deadlift", "Barbell Row", "Dumbbell Row", "Seated Cable Row",
+      "T-Bar Row", "Lat Pulldown", "Wide-Grip Pulldown", "Close-Grip Pulldown",
+      "Straight Arm Pulldown", "Face Pulls (Cable)", "Rear Delt Fly Machine",
+      "Reverse Fly Machine", "Shrug", "Barbell Shrug", "Dumbbell Shrug",
+      "Pull-Up", "Chin-Up", "Assisted Pull-Up", "Inverted Row"
+    ],
+    shoulders: [
+      "Overhead Press", "Military Press", "Dumbbell Shoulder Press", "Arnold Press",
+      "Lateral Raise", "Lateral Raise Machine", "Front Raise", "Rear Delt Raise",
+      "Cable Lateral Raise", "Cable Upright Row", "Face Pulls (Dumbbell)",
+      "Shrugs", "Barbell Shrug", "Dumbbell Shrug", "Shoulder Shrug Machine"
+    ],
+    arms: [
+      "EZ Bar Curl", "Barbell Curl", "Dumbbell Curl", "Hammer Curl", "Preacher Curl",
+      "Concentration Curl", "Cable Curl", "Curl Machine", "Incline Dumbbell Curl",
+      "Reverse Curl", "Wrist Curl", "Tricep Pushdown", "Tricep Rope Pushdown",
+      "Overhead Tricep Extension", "Tricep Dip Machine", "Skull Crusher",
+      "Close-Grip Bench Press", "Diamond Push-Up", "Tricep Kickback"
+    ],
+    legs: [
+      "Barbell Back Squat", "Front Squat", "Goblet Squat", "Bulgarian Split Squat",
+      "Walking Lunges (DBs)", "Reverse Lunges", "Leg Press", "Hack Squat",
+      "Barbell Hip Thrust", "Glute Bridge", "Romanian Deadlift", "Stiff-Legged Deadlift",
+      "Leg Curl Machine", "Seated Leg Curl", "Lying Leg Curl", "Leg Extension Machine",
+      "Sissy Squat", "Calf Raise", "Seated Calf Raise", "Standing Calf Raise",
+      "Abductor Machine", "Adductor Machine", "Hip Abductor", "Hip Adductor"
+    ],
+    core: [
+      "Cable Crunch", "Machine Crunch", "Hanging Leg Raise", "Captain's Chair Leg Raise",
+      "Plank", "Side Plank", "Russian Twist", "Bicycle Crunch", "Mountain Climber",
+      "Flutter Kick", "Leg Raise", "Ab Wheel Rollout", "Dragon Flag", "Hollow Body Hold",
+      "Dead Bug", "Bird Dog", "Superman", "Back Extension Machine"
+    ]
+  };
+
   // ─── SWAP ───
   window.openSwap=function(key,i){
     const ex=WORKOUT_PLAN[key].exercises[i];
+    const muscleGroup = getMuscleGroup(ex.name);
+    const suggestions = EXERCISE_DATABASE[muscleGroup] || [];
+
     document.getElementById("swt").textContent=`SWAP: ${ex.name}`; document.getElementById("swt").style.color=WORKOUT_PLAN[key].color;
     document.getElementById("swn").value=""; document.getElementById("sws").value=ex.sets||""; document.getElementById("swr").value=ex.reps||"";
     document.getElementById("swm").style.display="flex"; document.getElementById("swm").dataset.key=key; document.getElementById("swm").dataset.i=i;
-    setTimeout(()=>document.getElementById("swn").focus(),50);
+
+    // Populate suggestions
+    renderSwapSuggestions(suggestions, muscleGroup);
+
+    // Add input event listener for filtering
+    const input = document.getElementById("swn");
+    input.addEventListener('input', function() {
+      filterSwapSuggestions(this.value, suggestions);
+    });
+
+    setTimeout(()=>input.focus(),50);
   };
+
+  function renderSwapSuggestions(suggestions, muscleGroup) {
+    const container = document.getElementById("swsuggestions");
+    if (!suggestions.length) {
+      container.innerHTML = '<div class="sw-no-suggestions">No suggestions available for this muscle group</div>';
+      return;
+    }
+
+    container.innerHTML = suggestions.map(exercise =>
+      `<button class="sw-suggestion" onclick="selectSwapSuggestion('${exercise.replace(/'/g, "\\'")}')">${exercise}</button>`
+    ).join('');
+  }
+
+  function filterSwapSuggestions(query, allSuggestions) {
+    const container = document.getElementById("swsuggestions");
+    if (!query.trim()) {
+      renderSwapSuggestions(allSuggestions);
+      return;
+    }
+
+    const filtered = allSuggestions.filter(exercise =>
+      exercise.toLowerCase().includes(query.toLowerCase())
+    );
+
+    if (!filtered.length) {
+      container.innerHTML = '<div class="sw-no-suggestions">No exercises match your search</div>';
+      return;
+    }
+
+    container.innerHTML = filtered.map(exercise =>
+      `<button class="sw-suggestion" onclick="selectSwapSuggestion('${exercise.replace(/'/g, "\\'")}')">${exercise}</button>`
+    ).join('');
+  }
+
+  window.selectSwapSuggestion = function(exerciseName) {
+    document.getElementById("swn").value = exerciseName;
+    // Hide suggestions after selection
+    document.getElementById("swsuggestions").innerHTML = '';
+  };
+
   window.closeSwap=()=>document.getElementById("swm").style.display="none";
   window.confirmSwap=async function(){
     const m=document.getElementById("swm"),key=m.dataset.key,i=parseInt(m.dataset.i);
@@ -1702,6 +1799,14 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   .pcol{width:100%;min-width:unset;flex-direction:row;flex-wrap:wrap;gap:6px;padding:7px;border-top:none;border-left:3px solid var(--pcolor)}
   .pcol .eck{order:-1}
 }
+
+/* SWAP SUGGESTIONS */
+.sw-suggestions-container{max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;background:var(--bg2);margin:5px 0}
+.sw-suggestion{display:block;width:100%;text-align:left;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);padding:8px 12px;cursor:pointer;font-size:.9rem;transition:background .1s}
+.sw-suggestion:hover{background:var(--bg3)}
+.sw-suggestion:last-child{border-bottom:none}
+.sw-no-suggestions{padding:12px;text-align:center;color:var(--muted);font-size:.85rem;font-style:italic}
+
 @media(max-width:440px){
   .logo{font-size:1.25rem}
   #day-grid{grid-template-columns:1fr 1fr}
@@ -1867,7 +1972,8 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
       <button class="mcb" onclick="closeSwap()">×</button>
     </div>
     <div class="mbd" style="display:flex;flex-direction:column;gap:9px">
-      <input id="swn" class="fi" placeholder="New exercise name">
+      <input id="swn" class="fi" placeholder="New exercise name (or choose from suggestions below)">
+      <div id="swsuggestions" class="sw-suggestions-container"></div>
       <div style="display:flex;gap:7px;align-items:center">
         <input id="sws" type="number" class="fi" placeholder="Sets" min="0" max="10" style="width:68px">
         <span style="color:var(--muted);font-size:.82rem">sets ×</span>
