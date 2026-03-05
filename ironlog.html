@@ -1052,6 +1052,8 @@
     if(!wo.exercises[exName])wo.exercises[exName]={};
     wo.exercises[exName].checked=checked;
     if(checked){
+      // Haptic feedback for checking exercises
+      hapticFeedback(40);
       const w=parseFloat(wo.exercises[exName].weight||0);
       // Extract participant — new keys are "profile_ExName", old keys are just "ExName"
       const part=exName.includes('_')?exName.split('_')[0]:activeProfile;
@@ -1080,7 +1082,12 @@
     const snEl=document.getElementById(`snote-${key}`);
     if(snEl){ const wo=getWorkout(activeDate,key); wo.notes=snEl.value.trim(); }
     const wo=getWorkout(activeDate,key); wo.done=!wo.done;
-    if(wo.done)resetSessionTimer();
+    if(wo.done){
+      resetSessionTimer();
+      // Haptic feedback and confetti for completing workouts
+      hapticFeedback([100, 50, 100]);
+      showConfetti();
+    }
     const sy=window.scrollY; renderDayPanel(key); renderStats(); renderCharts(); renderCalendar(); window.scrollTo(0,sy);
     await saveData(); if(wo.done)toast("💪 WORKOUT LOGGED");
   };
@@ -1090,6 +1097,37 @@
     if(!state.bodyweight)state.bodyweight={};
     state.bodyweight[date]=w; renderCharts(); renderCalendar(); await saveData(); toast(`⚖️ ${w}kg logged`);
   };
+
+  // ─── HAPTIC FEEDBACK ───
+  window.hapticFeedback = function(pattern = 40) {
+    if (navigator.vibrate && /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+      navigator.vibrate(pattern);
+    }
+  };
+
+  window.showConfetti = function() {
+    const confettiContainer = document.getElementById('confetti-container');
+    if (!confettiContainer) return;
+
+    // Clear any existing confetti
+    confettiContainer.innerHTML = '';
+
+    // Create confetti pieces
+    for (let i = 0; i < 50; i++) {
+      const confetti = document.createElement('div');
+      confetti.className = 'confetti-piece';
+      confetti.style.left = Math.random() * 100 + 'vw';
+      confetti.style.animationDelay = Math.random() * 2 + 's';
+      confetti.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 50%)`;
+      confettiContainer.appendChild(confetti);
+    }
+
+    // Remove confetti after animation
+    setTimeout(() => {
+      if (confettiContainer) confettiContainer.innerHTML = '';
+    }, 3000);
+  };
+
   window.prevMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()-1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderStats();renderCharts(); };
   window.nextMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()+1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderStats();renderCharts(); };
 
@@ -1811,6 +1849,14 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   .logo{font-size:1.25rem}
   #day-grid{grid-template-columns:1fr 1fr}
 }
+
+/* CONFETTI ANIMATION */
+#confetti-container{position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:1000;overflow:hidden}
+.confetti-piece{position:absolute;width:8px;height:8px;animation:confetti-fall 3s ease-in-out forwards}
+@keyframes confetti-fall{
+  0%{transform:translateY(-10px) rotate(0deg);opacity:1}
+  100%{transform:translateY(100vh) rotate(720deg);opacity:0}
+}
 </style>
 </head>
 <body>
@@ -1988,6 +2034,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   </div>
 </div>
 
+<div id="confetti-container"></div>
 <div id="toast"></div>
 </body>
 </html>
