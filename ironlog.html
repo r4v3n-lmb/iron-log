@@ -65,17 +65,27 @@
   let unlockedDates = new Set();
 
   // ─── SESSION PARTICIPANTS ───
+  function getTrackableParticipants(key){
+    const planParts = WORKOUT_PLAN[key]?.participants || [activeProfile];
+    const set = new Set([activeProfile, ...planParts]);
+    // Quick partner toggle for the main shared pair
+    if(activeProfile === "revan" && PROFILES.bronwen) set.add("bronwen");
+    if(activeProfile === "bronwen" && PROFILES.revan) set.add("revan");
+    return Array.from(set).filter(p => !!PROFILES[p]);
+  }
   function getSessionParticipants(date, key){
     const wo = state.workouts?.[date]?.[key];
-    const planParts = WORKOUT_PLAN[key]?.participants || ['revan'];
-    if(planParts.length < 2) return planParts;
-    if(wo?.sessionParticipants) return wo.sessionParticipants;
+    const trackable = getTrackableParticipants(key);
+    if(wo?.sessionParticipants?.length){
+      const valid = wo.sessionParticipants.filter(p => trackable.includes(p));
+      if(valid.length) return valid;
+    }
     return [activeProfile];
   }
   window.toggleSessionParticipant = async function(key, participant){
     const wo = getWorkout(activeDate, key);
-    const planParts = WORKOUT_PLAN[key]?.participants || ['revan'];
-    if(!planParts.includes(participant)) return;
+    const trackable = getTrackableParticipants(key);
+    if(!trackable.includes(participant)) return;
     let current = wo.sessionParticipants ? [...wo.sessionParticipants] : [activeProfile];
     if(current.includes(participant)){
       if(current.length > 1) current = current.filter(p => p !== participant);
@@ -250,8 +260,9 @@
           state.savedWorkouts = d.savedWorkouts || {};
           state.gymUrl        = d.gymUrl        || "";
           const pd = d.profileData || {};
-          state.bodyweight    = pd[activeProfile]?.bodyweight || {};
-          state.health        = pd[activeProfile]?.health     || {};
+          const legacyPd = d[`profileData.${activeProfile}`] || {};
+          state.bodyweight    = pd[activeProfile]?.bodyweight || legacyPd.bodyweight || {};
+          state.health        = pd[activeProfile]?.health     || legacyPd.health     || {};
           if(!d.plan) saveData();
 
           // Debug: log what we loaded so you can verify in browser console
@@ -272,24 +283,21 @@
 
   async function saveData(){
     try {
-      // Read current snapshot to avoid overwriting other profile's personal data
       const ref = doc(db, "ironlog", SHARED_DOC);
-      // We merge profileData carefully
-      const profileDataUpdate = {};
-      profileDataUpdate[`${activeProfile}`] = {
-        bodyweight: state.bodyweight || {},
-        health:     state.health     || {}
-      };
       await setDoc(ref, {
         plan:          WORKOUT_PLAN,
         workouts:      state.workouts      || {},
         prs:           state.prs           || {},
         savedWorkouts: state.savedWorkouts || {},
         gymUrl:        state.gymUrl        || "",
-        [`profileData.${activeProfile}`]: {
-          bodyweight: state.bodyweight || {},
-          health:     state.health     || {}
-        }
+        profileData: {
+          [activeProfile]: {
+            bodyweight: state.bodyweight || {},
+            health:     state.health     || {}
+          }
+        },
+        // Backward-compat cleanup for legacy dotted-field writes
+        [`profileData.${activeProfile}`]: null
       }, { merge: true });
     } catch(e){ toast("⚠️ Save failed"); }
   }
@@ -826,7 +834,7 @@
   function renderHealthChecklist(){
     const el=document.getElementById("health-checklist"); if(!el)return;
     const today=getTodayStr(), p=PROFILES[activeProfile];
-    const h=state.health?.[today]||{water:0,creatine:false,aminos:false,protein:0,sleep:0};
+    const h=ensureHealthEntry(today);
     const adjustedWaterTarget = getAdjustedWaterTarget(activeProfile, today);
     const pt=p.protein||120;
     const wp=Math.min(100,Math.round((h.water/adjustedWaterTarget)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
@@ -836,14 +844,46 @@
     const bmiStatus=bmi<18.5?'UNDERWEIGHT':bmi<25?'NORMAL':bmi<30?'OVERWEIGHT':'OBESE';
     el.innerHTML=`<div class="hg">
       <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${adjustedWaterTarget.toFixed(1)}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
-      <div class="hi"><div class="hl">🧪 CREATINE</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS</button></div></div>
+      <div class="hi"><div class="hl">🧪 SUPPLEMENTS</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">CREATINE ${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS ${h.aminos?'✓ TAKEN':'NOT YET'}</button></div></div>
       <div class="hi"><div class="hl">🥩 PROTEIN</div><div class="hc"><button class="ha" onclick="adjHealth('protein',-5)">−</button><span class="hv">${h.protein}g / ${pt}g</span><button class="ha" onclick="adjHealth('protein',5)">+</button></div><div class="hbar"><div class="hbf" style="width:${pp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">😴 SLEEP</div><div class="hc"><button class="ha" onclick="adjHealth('sleep',-0.5)">−</button><span class="hv">${h.sleep.toFixed(1)}h</span><button class="ha" onclick="adjHealth('sleep',0.5)">+</button></div></div>
       <div class="hi bmi-card"><div class="hl">⚖️ BMI</div><div class="hc"><span class="bmi-value" style="color:${bmiColor}">${bmi}</span></div><div class="bmi-status" style="color:${bmiColor}">${bmiStatus}</div></div>
     </div>`;
   }
-  window.adjHealth=async function(k,d){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0,sleep:0}; state.health[t][k]=Math.max(0,parseFloat((state.health[t][k]+d).toFixed(1))); renderHealthChecklist(); await saveData(); };
-  window.togHealth=async function(k){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0,sleep:0}; state.health[t][k]=!state.health[t][k]; renderHealthChecklist(); await saveData(); };
+  function ensureHealthEntry(dateStr){
+    if(!state.health || typeof state.health !== "object" || Array.isArray(state.health)) state.health = {};
+    const v = state.health[dateStr];
+    if(!v || typeof v !== "object" || Array.isArray(v)){
+      state.health[dateStr]={water:0,creatine:false,aminos:false,protein:0,sleep:0};
+    }
+    const entry = state.health[dateStr];
+    if(typeof entry.water !== "number") entry.water = Number(entry.water || 0);
+    if(typeof entry.protein !== "number") entry.protein = Number(entry.protein || 0);
+    if(typeof entry.sleep !== "number") entry.sleep = Number(entry.sleep || 0);
+    if(typeof entry.creatine !== "boolean") entry.creatine = !!entry.creatine;
+    if(typeof entry.aminos !== "boolean") entry.aminos = !!entry.aminos;
+    return entry;
+  }
+  window.adjHealth=async function(k,d){
+    const t=getTodayStr();
+    const entry = ensureHealthEntry(t);
+    const current = Number(entry[k] || 0);
+    let next = current + d;
+    if(k==="protein") next = Math.round(next);
+    else if(k==="water") next = Math.round(next * 100) / 100;
+    else if(k==="sleep") next = Math.round(next * 10) / 10;
+    else next = Math.round(next * 100) / 100;
+    entry[k] = Math.max(0, next);
+    renderHealthChecklist();
+    await saveData();
+  };
+  window.togHealth=async function(k){
+    const t=getTodayStr();
+    const entry = ensureHealthEntry(t);
+    entry[k]=!entry[k];
+    renderHealthChecklist();
+    await saveData();
+  };
 
   // ─── VOLUME BY MUSCLE GROUP ───
   function getVolumeByMuscleGroup(dateStr) {
@@ -964,7 +1004,32 @@
     const ac = PROFILES[activeProfile].color;
     const sessChange = lastVol.sessions > 0 ? ((thisVol.sessions - lastVol.sessions) / lastVol.sessions * 100).toFixed(0) : thisVol.sessions > 0 ? 100 : 0;
     const tonnChange = lastVol.tonnage > 0 ? ((thisVol.tonnage - lastVol.tonnage) / lastVol.tonnage * 100).toFixed(0) : thisVol.tonnage > 0 ? 100 : 0;
-    const prChange = lastVol.prs > 0 ? ((thisVol.prs - lastVol.prs) / lastVol.prs * 100).toFixed(0) : thisVol.prs > 0 ? 100 : 0;\n    const sessColor = sessChange > 0 ? '#5cba5c' : sessChange < 0 ? '#ef4444' : '#f0c040';\n    const tonnColor = tonnChange > 0 ? '#5cba5c' : tonnChange < 0 ? '#ef4444' : '#f0c040';\n    const prColor = prChange > 0 ? '#5cba5c' : prChange < 0 ? '#ef4444' : '#f0c040';\n    el.innerHTML = `<div style=\"background:var(--bg3);border:1px solid var(--border);padding:13px;border-radius:6px;margin-top:10px\">\n      <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;font-size:.78rem;color:var(--muted);margin-bottom:11px\">📊 MONTH-OVER-MONTH</div>\n      <div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:9px\">\n        <div style=\"background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center\">\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px\">SESSIONS</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}\">${thisVol.sessions}</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${sessColor};margin-top:2px\">vs ${lastVol.sessions} (${sessChange > 0 ? '+' : ''}${sessChange}%)</div>\n        </div>\n        <div style=\"background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center\">\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px\">TONNAGE (kg)</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}\">${thisVol.tonnage}kg</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${tonnColor};margin-top:2px\">vs ${lastVol.tonnage}kg (${tonnChange > 0 ? '+' : ''}${tonnChange}%)</div>\n        </div>\n        <div style=\"background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center\">\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px\">NEW PRS</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}\">${thisVol.prs}</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${prColor};margin-top:2px\">vs ${lastVol.prs} (${prChange > 0 ? '+' : ''}${prChange}%)</div>\n        </div>\n      </div>\n      <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:var(--muted);margin-top:8px;text-align:center\">${thisMon} vs ${lastMon}</div>\n    </div>`;\n  }
+    const prChange = lastVol.prs > 0 ? ((thisVol.prs - lastVol.prs) / lastVol.prs * 100).toFixed(0) : thisVol.prs > 0 ? 100 : 0;
+    const sessColor = sessChange > 0 ? '#5cba5c' : sessChange < 0 ? '#ef4444' : '#f0c040';
+    const tonnColor = tonnChange > 0 ? '#5cba5c' : tonnChange < 0 ? '#ef4444' : '#f0c040';
+    const prColor = prChange > 0 ? '#5cba5c' : prChange < 0 ? '#ef4444' : '#f0c040';
+    el.innerHTML = `<div style="background:var(--bg3);border:1px solid var(--border);padding:13px;border-radius:6px;margin-top:10px">
+      <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;font-size:.78rem;color:var(--muted);margin-bottom:11px">📊 MONTH-OVER-MONTH</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px">
+        <div style="background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center">
+          <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px">SESSIONS</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}">${thisVol.sessions}</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${sessColor};margin-top:2px">vs ${lastVol.sessions} (${sessChange > 0 ? '+' : ''}${sessChange}%)</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center">
+          <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px">TONNAGE (kg)</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}">${thisVol.tonnage}kg</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${tonnColor};margin-top:2px">vs ${lastVol.tonnage}kg (${tonnChange > 0 ? '+' : ''}${tonnChange}%)</div>
+        </div>
+        <div style="background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center">
+          <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px">NEW PRS</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}">${thisVol.prs}</div>
+          <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${prColor};margin-top:2px">vs ${lastVol.prs} (${prChange > 0 ? '+' : ''}${prChange}%)</div>
+        </div>
+      </div>
+      <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:var(--muted);margin-top:8px;text-align:center">${thisMon} vs ${lastMon}</div>
+    </div>`;
+  }
 
   // ─── PERSONAL RECORDS WALL ───
   let prWallFilter = 'all';
@@ -1089,6 +1154,7 @@
     // planParticipants = who CAN do this workout (template setting)
     // sessionParticipants = who IS doing this specific session
     const planParticipants=day.participants||['revan'];
+    const trackableParticipants=getTrackableParticipants(key);
     const participants=isEditable ? getSessionParticipants(activeDate,key) : (wo.sessionParticipants||planParticipants);
     const isShared=planParticipants.length>1; // workout is a shared template
     const isSharedSession=participants.length>1; // this session has 2+ people
@@ -1110,6 +1176,14 @@
           <span class="pd-inline">${formatDate(activeDate)}</span>
           ${!isEditable?'<span class="vob">VIEW ONLY</span>':unlockedDates.has(activeDate)?'<span class="vob" style="border-color:rgba(92,186,92,.4);color:#b7f3b7">🔓 UNLOCKED</span>':''}
           ${ton>0?`<span class="ptons-inline">⚡ ${ton}kg</span>`:''}
+          ${isEditable && trackableParticipants.length>1 ? `<div class="ph-partner">
+            <span class="wt-label">TRACK:</span>
+            ${trackableParticipants.map(pp=>{
+              const pcolor=PROFILES[pp]?.color||'#888';
+              const active=participants.includes(pp);
+              return `<button class="wt-btn ${active?'wt-active':''}" style="${active?'border-color:'+pcolor+';color:'+pcolor+';background:'+pcolor+'18':''}" onclick="toggleSessionParticipant('${key}','${pp}')">${active?'✓ ':''}${PROFILES[pp]?.label||pp}</button>`;
+            }).join('')}
+          </div>` : ''}
         </div>
       </div>
       <div class="phr">`;
@@ -1273,21 +1347,6 @@
 
       h+=`<button class="donebtn ${wo.done?'da':''}" style="--c:${day.color}" onclick="markDone('${key}')">${wo.done?'✓ COMPLETED':'MARK AS DONE'}</button>`;
     }
-    // WHO'S TRAINING bar — only shown for shared-template workouts on editable sessions
-    if(isShared && isEditable){
-      h+=`<div class="wt-bar">
-        <span class="wt-label">👥 WHO'S TRAINING?</span>
-        <div class="wt-btns">`;
-      planParticipants.forEach(pp=>{
-        const pcolor=PROFILES[pp]?.color||'#888';
-        const active=participants.includes(pp);
-        h+=`<button class="wt-btn ${active?'wt-active':''}" style="${active?'border-color:'+pcolor+';color:'+pcolor+';background:'+pcolor+'18':''}" onclick="toggleSessionParticipant('${key}','${pp}')">
-          ${active?'✓':''} ${PROFILES[pp]?.label||pp}
-        </button>`;
-      });
-      h+=`</div></div>`;
-    }
-
     panel.innerHTML=h; panel.style.display="block"; updateTimerBtns();
   }
 
@@ -1310,8 +1369,14 @@
       window._otherBW[participant][date]=w;
       // Save directly to Firebase merge path
       try {
-        const { doc: fbDoc, setDoc: fbSet } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-        await setDoc(doc(db,"ironlog",SHARED_DOC),{[`profileData.${participant}`]:{bodyweight:{[date]:w}}},{merge:true});
+        await setDoc(doc(db,"ironlog",SHARED_DOC),{
+          profileData:{
+            [participant]:{
+              bodyweight:{[date]:w}
+            }
+          },
+          [`profileData.${participant}`]: null
+        },{merge:true});
         toast(`⚖️ ${PROFILES[participant].label}: ${w}kg`);
         return;
       } catch(e){}
@@ -2029,6 +2094,7 @@ html.light-mode body{background-image:repeating-linear-gradient(0deg,transparent
 .phl{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
 .ph-row1{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .ph-row2{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ph-partner{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .phr{display:flex;flex-direction:row;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
 .pl{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;font-size:.88rem}
 .ps-inline{color:var(--muted);font-family:'Barlow Condensed',sans-serif;font-size:.75rem;letter-spacing:.06em}
@@ -2484,7 +2550,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 <div id="em">
   <div class="mbox">
     <div class="mhd">
-      <span id="emit" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em"></span>
+      <span id="emit" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em">EDIT WORKOUT</span>
       <button class="mcb" onclick="closeEdit()">×</button>
     </div>
     <div id="emb"></div>
