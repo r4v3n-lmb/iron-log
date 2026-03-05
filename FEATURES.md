@@ -14,8 +14,8 @@
 - [x] **Haptic feedback** — when you check off an exercise on mobile, a short vibration (`navigator.vibrate(40)`). Tiny thing, feels satisfying. (In conjunction with haptic feedback, add it on Completing a workout and also shoot some confetti.)
 
 ### Medium Priority
-- [ ] **Exercise history graph** — tap any exercise name and see a mini line chart of your weight over time. Right now you can't easily tell if you've been progressing on cable flys over 3 months without digging through dates manually.
-- [ ] **1RM calculator** — sits below dashboard Enter your working weight and reps, it estimates your one-rep max using the Epley formula. Good motivator and useful for programming.
+- [x] **Exercise history graph** — tap any exercise name and see a mini line chart of your weight over time. Right now you can't easily tell if you've been progressing on cable flys over 3 months without digging through dates manually.
+- [x] **1RM calculator** — sits below dashboard. Enter your working weight and reps, it estimates your one-rep max using the Epley formula. Good motivator and useful for programming.
 - [ ] **BMI tracker** — alongside bodyweight, include adding or Weekly BMI for tracking
 - [ ] **Volume per muscle group chart** — instead of just total tonnage, break it down: how many sets did chest get this week vs back vs legs. Helps spot imbalances.
 - [ ] **Month-over-month comparison** — "This month vs last month" card showing volume, sessions, and top PRs side by side.
@@ -37,6 +37,7 @@
 - [x] **Personal records wall** — Added a dedicated section showing every PR you hold with filtering by muscle group. Shows the date achieved and how long you've held each record. Displays weight, exercise name, muscle group badge, and duration held.
 - [x] **Consistency score** — Added a 0-100 consistency score in the stats bar showing percentage of planned workouts completed over the last 4 weeks. More motivating than streaks since missing one day doesn't reset progress.
 - [x] **Swipe gestures on mobile** — Added touch gesture support for exercise rows on mobile devices. Swipe left to mark exercise as done, swipe right to uncheck/skip. Includes visual feedback with smooth animations and color indicators. Only enabled on touch devices to avoid desktop interference.
+- [x] **1RM calculator** — Interactive calculator below the dashboard to estimate one-rep max using the Epley formula. Users enter working weight and reps; calculator instantly displays estimated 1RM with formula breakdown. Useful for programming and tracking strength progression. Clean UI with real-time calculation feedback.
 
 ---
 

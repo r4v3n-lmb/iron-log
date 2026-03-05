@@ -515,6 +515,117 @@
     return null;
   }
 
+  // ─── EXERCISE HISTORY ───
+  function getExerciseHistory(exerciseName, participant = activeProfile) {
+    const history = [];
+    Object.keys(state.workouts || {}).sort().forEach(date => {
+      Object.keys(state.workouts[date]).forEach(dayKey => {
+        const workout = state.workouts[date][dayKey];
+        if (!workout.done) return;
+
+        const exercises = workout.exercises || {};
+        const { data: exerciseData } = getExData(exercises, participant, exerciseName);
+
+        if (exerciseData && exerciseData.checked && exerciseData.weight) {
+          const weight = parseFloat(exerciseData.weight);
+          if (weight > 0) {
+            history.push({
+              date: date,
+              weight: weight,
+              reps: exerciseData.actualReps || exerciseData.reps,
+              dayKey: dayKey
+            });
+          }
+        }
+      });
+    });
+    return history.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  let exerciseHistoryChart = null;
+
+  window.showExerciseHistory = function(exerciseName) {
+    const history = getExerciseHistory(exerciseName);
+    if (history.length === 0) {
+      toast("⚠️ No history found for this exercise");
+      return;
+    }
+
+    // Prepare chart data
+    const labels = history.map(h => {
+      const date = new Date(h.date + "T12:00:00");
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    });
+    const weights = history.map(h => h.weight);
+    const colors = history.map(h => WORKOUT_PLAN[h.dayKey]?.color || '#888');
+
+    // Show modal
+    document.getElementById("exercise-history-title").textContent = exerciseName;
+    document.getElementById("exercise-history-modal").style.display = "flex";
+
+    // Create or update chart
+    const ctx = document.getElementById("exercise-history-chart");
+    if (exerciseHistoryChart) {
+      exerciseHistoryChart.destroy();
+    }
+
+    exerciseHistoryChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Weight (kg)",
+          data: weights,
+          borderColor: "#e85d04",
+          backgroundColor: "rgba(232, 93, 4, 0.07)",
+          borderWidth: 2.5,
+          pointBackgroundColor: colors,
+          pointBorderColor: colors,
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          tension: 0.3,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false }
+        },
+        scales: {
+          x: {
+            ticks: {
+              color: "#888",
+              font: { family: "Barlow Condensed", size: 11 }
+            },
+            grid: { color: "rgba(255,255,255,0.04)" }
+          },
+          y: {
+            ticks: {
+              color: "#888",
+              font: { family: "Barlow Condensed" }
+            },
+            grid: { color: "rgba(255,255,255,0.04)" },
+            beginAtZero: false
+          }
+        },
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        }
+      }
+    });
+  };
+
+  window.closeExerciseHistory = function() {
+    document.getElementById("exercise-history-modal").style.display = "none";
+    if (exerciseHistoryChart) {
+      exerciseHistoryChart.destroy();
+      exerciseHistoryChart = null;
+    }
+  };
+
   // ─── HEATMAP ───
   function renderHeatmap(){
     const el=document.getElementById("heatmap"); if(!el)return;
@@ -569,7 +680,7 @@
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); updateLogoColor();
+    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); updateLogoColor();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -737,6 +848,62 @@
     el.innerHTML = h;
   }
   window.setPrWallFilter = function(filter){ prWallFilter = filter; renderPersonalRecordsWall(); };
+
+  // ─── 1RM CALCULATOR ───
+  function calculateOneRepMax(weight, reps) {
+    if (!weight || weight <= 0 || !reps || reps <= 0) return null;
+    // Epley formula: 1RM = weight × (1 + (reps / 30))
+    return weight * (1 + (reps / 30));
+  }
+
+  function render1RMCalculator() {
+    const el = document.getElementById('orm-calc');
+    if (!el) return;
+    const ac = PROFILES[activeProfile].color;
+    el.innerHTML = `<div class="orm-container">
+      <div class="orm-header">💪 ONE-REP MAX ESTIMATOR</div>
+      <div class="orm-inputs">
+        <div class="orm-input-group">
+          <label class="orm-input-label">WORKING WEIGHT (kg)</label>
+          <input type="number" id="orm-weight" class="orm-input" placeholder="e.g. 100" step="0.5" min="0" onchange="updateORM()" oninput="updateORM()">
+        </div>
+        <div class="orm-input-group">
+          <label class="orm-input-label">REPS AT WEIGHT</label>
+          <input type="number" id="orm-reps" class="orm-input" placeholder="e.g. 8" step="1" min="1" max="50" onchange="updateORM()" oninput="updateORM()">
+        </div>
+      </div>
+      <div id="orm-display" style="display:none">
+        <div class="orm-result">
+          <div class="orm-result-value" id="orm-value" style="color:${ac}">—</div>
+          <div class="orm-result-label">ESTIMATED 1RM</div>
+          <div class="orm-formula" id="orm-calc-details"></div>
+        </div>
+      </div>
+      <div class="orm-note">
+        📌 Uses the <strong>Epley Formula</strong>: 1RM = Weight × (1 + Reps/30). This is an estimate—actual 1RM may vary based on form, fatigue, and individual differences.
+      </div>
+    </div>`;
+    updateORM();
+  }
+
+  window.updateORM = function() {
+    const w = parseFloat(document.getElementById('orm-weight')?.value || 0);
+    const r = parseInt(document.getElementById('orm-reps')?.value || 0);
+    const display = document.getElementById('orm-display');
+    const value = document.getElementById('orm-value');
+    const details = document.getElementById('orm-calc-details');
+    
+    if (w > 0 && r > 0) {
+      const orm = calculateOneRepMax(w, r);
+      if (orm) {
+        value.textContent = orm.toFixed(1) + 'kg';
+        details.textContent = `${w}kg × (1 + ${r}/30) = ${orm.toFixed(1)}kg`;
+        display.style.display = 'block';
+      }
+    } else {
+      display.style.display = 'none';
+    }
+  };
   function getMuscleColor(group){
     const colors = {
       chest: '#e85d04',
@@ -852,7 +1019,7 @@
 
           h+=`<div class="er er-dual ${allChecked?'done':''}">
             <div class="enc-dual">
-              <span class="en">${displayName}${anyPR?`<span class="prb">🏆 PR</span>`:''}</span>
+              <span class="en" onclick="showExerciseHistory('${displayName.replace(/'/g, "\\'")}')" style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(232,93,4,0.3);text-underline-offset:2px">${displayName}${anyPR?`<span class="prb">🏆 PR</span>`:''}</span>
               <span class="et-target">${ic?ex.reps:`${ex.sets}×${ex.reps}`}</span>
               <div class="move-btns">
                 <button class="mvb" ${!isEditable?'disabled':''} onclick="moveExLive('${key}',${i},-1)" title="Move up">▲</button>
@@ -905,7 +1072,7 @@
           h+=`<div class="er ${ed.checked?'done':''}">
             <label class="eck"><input type="checkbox" ${ed.checked?'checked':''} ${dis} onchange="togEx('${key}','${exKey}',this.checked)"><span class="ecm" style="--c:${day.color}"></span></label>
             <div class="enc">
-              <span class="en">${displayName}${prb}</span>
+              <span class="en" onclick="showExerciseHistory('${displayName.replace(/'/g, "\\'")}')" style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(232,93,4,0.3);text-underline-offset:2px">${displayName}${prb}</span>
               ${olb||lwh?`<div class="ehi">${olb}${!ol?lwh:''}</div>`:''}
             </div>
             <span class="et">${ic?ex.reps:`${ex.sets}×${ex.reps}`}</span>
@@ -1878,6 +2045,20 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
 /* HEALTH */
 .hg{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+
+/* 1RM CALCULATOR */
+.orm-container{background:var(--bg3);border:1px solid var(--border);padding:13px;border-radius:6px}
+.orm-header{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;font-size:.78rem;color:var(--muted);margin-bottom:11px}  
+.orm-inputs{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:13px}
+.orm-input-group{display:flex;flex-direction:column;gap:4px}
+.orm-input-label{font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted)}
+.orm-input{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 11px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;outline:none;border-radius:3px;font-size:.88rem}
+.orm-input:focus{border-color:var(--accent)}
+.orm-result{background:linear-gradient(135deg,rgba(232,93,4,0.1),rgba(232,93,4,0.05));border:1px solid rgba(232,93,4,.3);border-radius:6px;padding:13px;text-align:center}
+.orm-result-value{font-size:2.2rem;font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;color:#e85d04}
+.orm-result-label{font-family:'Barlow Condensed',sans-serif;letter-spacing:.12em;font-size:.68rem;color:var(--muted);margin-top:5px}
+.orm-formula{font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.68rem;color:var(--muted);margin-top:7px;padding:7px;background:rgba(255,255,255,.02);border-radius:3px}
+.orm-note{font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:var(--muted);margin-top:9px;line-height:1.4}
 @media(max-width:680px){.hg{grid-template-columns:1fr}}
 .hi{background:var(--bg3);border:1px solid var(--border);padding:11px 13px}
 .hl{font-family:'Barlow Condensed',sans-serif;letter-spacing:.12em;font-size:.72rem;color:var(--muted);margin-bottom:7px}
@@ -2075,6 +2256,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <div id="heatmap"></div>
   </div>
 
+  <div class="sec">// 1RM CALCULATOR</div>
+  <div id="orm-calc"></div>
+
   <div class="nav-sec">
     <button class="nav-btn" onclick="navigateToGym()">🗺 NAVIGATE TO GYM</button>
     <button class="nav-rst" onclick="resetGymUrl()">RESET URL</button>
@@ -2185,6 +2369,21 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <div class="mft">
       <button class="mcc" onclick="closeSwap()">CANCEL</button>
       <button class="msc" onclick="confirmSwap()">CONFIRM SWAP</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXERCISE HISTORY MODAL -->
+<div id="exercise-history-modal">
+  <div class="mbox mbox-lg">
+    <div class="mhd">
+      <span id="exercise-history-title" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em"></span>
+      <button class="mcb" onclick="closeExerciseHistory()">×</button>
+    </div>
+    <div class="mbd" style="padding:20px">
+      <div style="height:300px;width:100%">
+        <canvas id="exercise-history-chart"></canvas>
+      </div>
     </div>
   </div>
 </div>
