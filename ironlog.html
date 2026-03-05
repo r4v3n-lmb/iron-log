@@ -46,11 +46,11 @@
   let WORKOUT_PLAN = {};
 
   const PROFILES = {
-    revan:  { label:"REVAN",  docId:"data_revan",  color:"#e85d04", birthday:"04-30", water:3.0, protein:160 },
-    bronwen:{ label:"BRONWEN",docId:"data_bronwen",color:"#f72585", birthday:"04-25", water:2.5, protein:120 },
-    user3:  { label:"USER 3", docId:"data_user3",  color:"#4361ee", birthday:null, water:2.5, protein:120 },
-    user4:  { label:"USER 4", docId:"data_user4",  color:"#2ec4b6", birthday:null, water:2.5, protein:120 },
-    user5:  { label:"USER 5", docId:"data_user5",  color:"#7b2d8b", birthday:null, water:2.5, protein:120 },
+    revan:  { label:"REVAN",  docId:"data_revan",  color:"#e85d04", birthday:"04-30", water:3.0, protein:160, height:175 },
+    bronwen:{ label:"BRONWEN",docId:"data_bronwen",color:"#f72585", birthday:"04-25", water:2.5, protein:120, height:165 },
+    user3:  { label:"USER 3", docId:"data_user3",  color:"#4361ee", birthday:null, water:2.5, protein:120, height:180 },
+    user4:  { label:"USER 4", docId:"data_user4",  color:"#2ec4b6", birthday:null, water:2.5, protein:120, height:170 },
+    user5:  { label:"USER 5", docId:"data_user5",  color:"#7b2d8b", birthday:null, water:2.5, protein:120, height:175 },
   };
 
   let activeProfile = localStorage.getItem("ironlog_profile")||"revan";
@@ -680,7 +680,7 @@
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); updateLogoColor();
+    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); updateLogoColor();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -757,6 +757,10 @@
     const sleep=getSleepHistory();
     if(sleepChart){sleepChart.data.labels=sleep.map(x=>x.label);sleepChart.data.datasets[0].data=sleep.map(x=>x.sleep);sleepChart.update();}
     else sleepChart=new Chart(document.getElementById("sleepChart"),{type:"line",data:{labels:sleep.map(x=>x.label),datasets:[{label:"hours",data:sleep.map(x=>x.sleep),borderColor:"#7b2d8b",backgroundColor:"rgba(123,45,139,0.07)",borderWidth:2.5,pointBackgroundColor:"#7b2d8b",pointRadius:4,pointHoverRadius:6,tension:0.4,fill:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}}});
+    const mvm=getMonthVolumeByMuscleGroup();
+    const mvLabels=['CHEST','BACK','SHOULDERS','ARMS','LEGS','CORE'],mvData=[mvm.chest,mvm.back,mvm.shoulders,mvm.arms,mvm.legs,mvm.core],mvColors=['#e85d04','#4361ee','#2ec4b6','#f72585','#7b2d8b','#f0c040'];
+    if(window.muscleVolChart){window.muscleVolChart.data.datasets[0].data=mvData;window.muscleVolChart.update();}
+    else {const mvCanvas=document.getElementById('muscleVolChart');if(mvCanvas)window.muscleVolChart=new Chart(mvCanvas,{type:'doughnut',data:{labels:mvLabels,datasets:[{data:mvData,backgroundColor:mvColors,borderColor:'#111',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#aaa',font:{family:'Barlow Condensed',size:11},padding:10,boxWidth:12}}}}});}
   }
 
   function renderWeeklySummary(){
@@ -794,15 +798,140 @@
     const wt=p.water||2.5, pt=p.protein||120;
     const wp=Math.min(100,Math.round((h.water/wt)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
     const ac=PROFILES[activeProfile].color;
+    const bw=state.bodyweight?.[today]||0, h_m=(p.height||175)/100, bmi=bw>0?(bw/(h_m*h_m)).toFixed(1):0;
+    const bmiColor=bmi<18.5?'#5cba5c':bmi<25?'#f0c040':bmi<30?'#f97316':'#ef4444';
+    const bmiStatus=bmi<18.5?'UNDERWEIGHT':bmi<25?'NORMAL':bmi<30?'OVERWEIGHT':'OBESE';
     el.innerHTML=`<div class="hg">
       <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${wt}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">🧪 CREATINE</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS</button></div></div>
       <div class="hi"><div class="hl">🥩 PROTEIN</div><div class="hc"><button class="ha" onclick="adjHealth('protein',-5)">−</button><span class="hv">${h.protein}g / ${pt}g</span><button class="ha" onclick="adjHealth('protein',5)">+</button></div><div class="hbar"><div class="hbf" style="width:${pp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">😴 SLEEP</div><div class="hc"><button class="ha" onclick="adjHealth('sleep',-0.5)">−</button><span class="hv">${h.sleep.toFixed(1)}h</span><button class="ha" onclick="adjHealth('sleep',0.5)">+</button></div></div>
+      <div class="hi bmi-card"><div class="hl">⚖️ BMI</div><div class="hc"><span class="bmi-value" style="color:${bmiColor}">${bmi}</span></div><div class="bmi-status" style="color:${bmiColor}">${bmiStatus}</div></div>
     </div>`;
   }
   window.adjHealth=async function(k,d){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0,sleep:0}; state.health[t][k]=Math.max(0,parseFloat((state.health[t][k]+d).toFixed(1))); renderHealthChecklist(); await saveData(); };
   window.togHealth=async function(k){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0,sleep:0}; state.health[t][k]=!state.health[t][k]; renderHealthChecklist(); await saveData(); };
+
+  // ─── VOLUME BY MUSCLE GROUP ───
+  function getVolumeByMuscleGroup(dateStr) {
+    const wo = state.workouts?.[dateStr] || {};
+    const muscleVol = { chest: 0, back: 0, shoulders: 0, arms: 0, legs: 0, core: 0, other: 0 };
+    Object.keys(wo).forEach(dayKey => {
+      const session = wo[dayKey];
+      if (!session.done) return;
+      const day = WORKOUT_PLAN[dayKey];
+      if (!day) return;
+      day.exercises.forEach(ex => {
+        const muscle = getMuscleGroup(ex.name);
+        muscleVol[muscle] = (muscleVol[muscle] || 0) + (ex.sets || 0);
+      });
+    });
+    return muscleVol;
+  }
+  function getMonthVolumeByMuscleGroup() {
+    const p = getMonthKey();
+    const muscleVol = { chest: 0, back: 0, shoulders: 0, arms: 0, legs: 0, core: 0, other: 0 };
+    Object.keys(state.workouts || {}).forEach(d => {
+      if (!d.startsWith(p)) return;
+      const vol = getVolumeByMuscleGroup(d);
+      Object.keys(vol).forEach(m => { muscleVol[m] += vol[m]; });
+    });
+    return muscleVol;
+  }
+
+  // ─── MONTH-OVER-MONTH COMPARISON ───
+  function getMonthComparisonData() {
+    const today = getTodayStr();
+    const thisMonth = getMonthKey();
+    const thisVol = { sessions: 0, tonnage: 0, prs: 0 };
+    const lastMonthStr = new Date(new Date().setMonth(new Date().getMonth() - 1)).toISOString().substring(0, 7);
+    const lastVol = { sessions: 0, tonnage: 0, prs: 0 };
+
+    Object.keys(state.workouts || {}).forEach(d => {
+      if (d.startsWith(thisMonth)) {
+        Object.keys(state.workouts[d]).forEach(k => {
+          if (state.workouts[d][k].done) {
+            thisVol.sessions++;
+            thisVol.tonnage += calcSessionTonnage(d, k);
+          }
+        });
+      } else if (d.startsWith(lastMonthStr)) {
+        Object.keys(state.workouts[d]).forEach(k => {
+          if (state.workouts[d][k].done) {
+            lastVol.sessions++;
+            lastVol.tonnage += calcSessionTonnage(d, k);
+          }
+        });
+      }
+    });
+
+    Object.keys(state.prs || {}).forEach(key => {
+      const pr = state.prs[key];
+      if (pr.participant === activeProfile) {
+        if (pr.date.startsWith(thisMonth)) thisVol.prs++;
+        else if (pr.date.startsWith(lastMonthStr)) lastVol.prs++;
+      }
+    });
+
+    return { thisMonth, lastMonthStr, thisVol, lastVol };
+  }
+
+  // ─── WORKOUT TEMPLATES / PROGRAMS ───
+  let workoutTemplates = JSON.parse(localStorage.getItem('ironlog_templates')) || {};
+  function saveTemplate(templateName) {
+    const cleanName = templateName.trim().toUpperCase();
+    if (!cleanName) { toast('Please enter a template name'); return; }
+    workoutTemplates[cleanName] = deepCopy(WORKOUT_PLAN);
+    localStorage.setItem('ironlog_templates', JSON.stringify(workoutTemplates));
+    toast(`✓ Saved template: ${cleanName}`);
+    renderTemplateList();
+  }
+  function loadTemplate(templateName) {
+    if (!workoutTemplates[templateName]) return;
+    WORKOUT_PLAN = deepCopy(workoutTemplates[templateName]);
+    toast(`✓ Loaded template: ${templateName}`);
+    saveData();
+    renderDayGrid();
+    renderAll();
+  }
+  function deleteTemplate(templateName) {
+    delete workoutTemplates[templateName];
+    localStorage.setItem('ironlog_templates', JSON.stringify(workoutTemplates));
+    toast(`🗑 Deleted template: ${templateName}`);
+    renderTemplateList();
+  }
+  function renderTemplateList() {
+    const el = document.getElementById('template-list');
+    if (!el) return;
+    const names = Object.keys(workoutTemplates);
+    if (names.length === 0) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:.8rem;padding:10px">No templates saved yet. Create a program and save it!</div>';
+      return;
+    }
+    el.innerHTML = names.map(name => `<div class="template-item">
+      <span class="template-name">${name}</span>
+      <div class="template-btns">
+        <button class="template-btn-load" onclick="loadTemplate('${name}')">LOAD</button>
+        <button class="template-btn-del" onclick="deleteTemplate('${name}')">DEL</button>
+      </div>
+    </div>`).join('');
+  }
+  window.saveTemplate = saveTemplate;
+  window.loadTemplate = loadTemplate;
+  window.deleteTemplate = deleteTemplate;
+  window.renderTemplateList = renderTemplateList;
+
+  // ─── RENDER MONTH-OVER-MONTH COMPARISON ───
+  function renderMonthComparison() {
+    const el = document.getElementById('month-comparison');
+    if (!el) return;
+    const { thisMonth, lastMonthStr, thisVol, lastVol } = getMonthComparisonData();
+    const thisMon = thisMonth.substring(5);
+    const lastMon = lastMonthStr.substring(5);
+    const ac = PROFILES[activeProfile].color;
+    const sessChange = lastVol.sessions > 0 ? ((thisVol.sessions - lastVol.sessions) / lastVol.sessions * 100).toFixed(0) : thisVol.sessions > 0 ? 100 : 0;
+    const tonnChange = lastVol.tonnage > 0 ? ((thisVol.tonnage - lastVol.tonnage) / lastVol.tonnage * 100).toFixed(0) : thisVol.tonnage > 0 ? 100 : 0;
+    const prChange = lastVol.prs > 0 ? ((thisVol.prs - lastVol.prs) / lastVol.prs * 100).toFixed(0) : thisVol.prs > 0 ? 100 : 0;\n    const sessColor = sessChange > 0 ? '#5cba5c' : sessChange < 0 ? '#ef4444' : '#f0c040';\n    const tonnColor = tonnChange > 0 ? '#5cba5c' : tonnChange < 0 ? '#ef4444' : '#f0c040';\n    const prColor = prChange > 0 ? '#5cba5c' : prChange < 0 ? '#ef4444' : '#f0c040';\n    el.innerHTML = `<div style=\"background:var(--bg3);border:1px solid var(--border);padding:13px;border-radius:6px;margin-top:10px\">\n      <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;font-size:.78rem;color:var(--muted);margin-bottom:11px\">📊 MONTH-OVER-MONTH</div>\n      <div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:9px\">\n        <div style=\"background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center\">\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px\">SESSIONS</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}\">${thisVol.sessions}</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${sessColor};margin-top:2px\">vs ${lastVol.sessions} (${sessChange > 0 ? '+' : ''}${sessChange}%)</div>\n        </div>\n        <div style=\"background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center\">\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px\">TONNAGE (kg)</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}\">${thisVol.tonnage}kg</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${tonnColor};margin-top:2px\">vs ${lastVol.tonnage}kg (${tonnChange > 0 ? '+' : ''}${tonnChange}%)</div>\n        </div>\n        <div style=\"background:var(--bg2);border:1px solid var(--border);padding:9px;border-radius:4px;text-align:center\">\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted);margin-bottom:4px\">NEW PRS</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.1rem;color:${ac}\">${thisVol.prs}</div>\n          <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:${prColor};margin-top:2px\">vs ${lastVol.prs} (${prChange > 0 ? '+' : ''}${prChange}%)</div>\n        </div>\n      </div>\n      <div style=\"font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.65rem;color:var(--muted);margin-top:8px;text-align:center\">${thisMon} vs ${lastMon}</div>\n    </div>`;\n  }
 
   // ─── PERSONAL RECORDS WALL ───
   let prWallFilter = 'all';
@@ -1715,8 +1844,8 @@
   };
   window.resetGymUrl=function(){ state.gymUrl=""; saveData(); toast("🗺 Gym URL cleared"); };
 
-  // ─── SETTINGS ───
-  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; };
+  // ─── SETTINGS ─────
+  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
@@ -2070,6 +2199,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .htb.active{background:rgba(232,93,4,.1)}
 .hbar{height:4px;background:rgba(255,255,255,.06);overflow:hidden}
 .hbf{height:100%;transition:width .4s}
+.bmi-card{grid-column:span 1}
+.bmi-value{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.5rem;letter-spacing:.1em}
+.bmi-status{font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.65rem;margin-top:2px;font-weight:700}
 
 /* PERSONAL RECORDS WALL */
 #pr-wall{background:var(--bg3);border:1px solid var(--border);padding:15px}
@@ -2113,6 +2245,15 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .th-btns{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .th-btn{border:1px solid var(--border);background:var(--bg3);color:var(--muted);padding:7px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;letter-spacing:.12em;font-size:.75rem;text-align:center}
 .th-btn:hover{background:var(--bg4);color:var(--text)}
+
+/* TEMPLATES */
+.template-item{display:flex;justify-content:space-between;align-items:center;padding:11px;background:var(--bg2);border:1px solid var(--border);margin-bottom:5px;border-radius:3px}
+.template-name{font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:.1em;flex:1}
+.template-btns{display:flex;gap:4px}
+.template-btn-load{background:rgba(92,186,92,.1);border:1px solid rgba(92,186,92,.3);color:#5cba5c;padding:5px 10px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:.7rem;letter-spacing:.1em;border-radius:2px}
+.template-btn-load:hover{background:rgba(92,186,92,.2)}
+.template-btn-del{background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.3);color:#f43f5e;padding:5px 10px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-size:.7rem;letter-spacing:.1em;border-radius:2px}
+.template-btn-del:hover{background:rgba(244,63,94,.2)}
 
 /* NAVIGATE */
 .nav-sec{margin-top:18px;border-top:1px solid var(--border);padding-top:13px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
@@ -2249,10 +2390,12 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <div class="charts-row">
       <div class="chart-box"><div class="chart-title">WEEKLY FREQUENCY</div><canvas id="freqChart"></canvas></div>
       <div class="chart-box"><div class="chart-title">SESSION BREAKDOWN</div><canvas id="volChart"></canvas></div>
+      <div class="chart-box"><div class="chart-title">VOLUME BY MUSCLE</div><canvas id="muscleVolChart"></canvas></div>
       <div class="chart-box"><div class="chart-title">SESSION TONNAGE (kg)</div><canvas id="tonnageChart"></canvas></div>
       <div class="chart-box"><div class="chart-title">BODYWEIGHT TREND (kg)</div><canvas id="bwChart"></canvas></div>
       <div class="chart-box"><div class="chart-title">SLEEP TREND (hrs)</div><canvas id="sleepChart"></canvas></div>
     </div>
+    <div id="month-comparison" style="margin-top:12px"></div>
     <div id="heatmap"></div>
   </div>
 
@@ -2286,6 +2429,14 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <button class="st-ab" onclick="debugFirebase()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">🔍 CHECK FIREBASE DOCS</button>
     <button class="st-ab" onclick="forceMigrate()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⚡ FORCE RE-MIGRATE DATA</button>
     <div style="font-size:.7rem;color:var(--muted);margin-top:4px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em">Open browser console (F12) to see results</div>
+  </div>
+  <div class="sts">
+    <div class="stst">// WORKOUT TEMPLATES</div>
+    <div style="display:flex;gap:5px;margin-bottom:8px">
+      <input type="text" id="template-input" placeholder="Template name..." style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 9px;font-family:'Barlow Condensed',sans-serif;outline:none" onkeydown="if(event.key==='Enter')saveTemplate(this.value)">
+      <button class="st-ab" style="width:auto;margin:0;background:rgba(92,186,92,.1);border-color:rgba(92,186,92,.3);color:#5cba5c" onclick="saveTemplate(document.getElementById('template-input').value)">SAVE</button>
+    </div>
+    <div id="template-list" style="font-size:.75rem"></div>
   </div>
   <div class="sts">
     <div class="stst">// THEME</div>
