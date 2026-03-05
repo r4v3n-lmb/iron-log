@@ -58,7 +58,7 @@
   let activeDay = null;
   let activeDate = getTodayStr();
   let unsubscribeFn = null;
-  let freqChart=null, volChart=null, bwChart=null, tonnageChart=null;
+  let freqChart=null, volChart=null, bwChart=null, tonnageChart=null, sleepChart=null;
   let panelCollapsed = false;
   let dashboardOpen = false;
   let heatmapFilter = 'year';
@@ -298,8 +298,8 @@
     if(pk===activeProfile) return;
     activeProfile=pk; localStorage.setItem("ironlog_profile",pk);
     // Don't wipe workouts/plan — those are shared. Just reload personal data.
-    [freqChart,volChart,bwChart,tonnageChart].forEach(c=>{ if(c)c.destroy(); });
-    freqChart=volChart=bwChart=tonnageChart=null;
+    [freqChart,volChart,bwChart,tonnageChart,sleepChart].forEach(c=>{ if(c)c.destroy(); });
+    freqChart=volChart=bwChart=tonnageChart=sleepChart=null;
     activeDay=null; panelCollapsed=false;
     document.getElementById("day-panel").style.display="none";
     updateLogoColor(); renderSettingsProfiles(); loadData();
@@ -401,6 +401,46 @@
     Object.keys(state.bodyweight||{}).sort().forEach(d=>{ if(d.startsWith(p))r.push({date:d,weight:state.bodyweight[d],label:d.slice(5)}); });
     return r;
   }
+  function getSleepHistory(){
+    const p=getMonthKey(),r=[];
+    Object.keys(state.health||{}).sort().forEach(d=>{ if(d.startsWith(p))r.push({date:d,sleep:state.health[d]?.sleep||0,label:d.slice(5)}); });
+    return r;
+  }
+  function getMuscleGroup(exerciseName){
+    const muscles = {
+      chest: ['bench', 'press', 'fly', 'chest', 'pec', 'push-up', 'dip'],
+      back: ['pull', 'row', 'lat', 'deadlift', 'shrug', 'face pull', 'rear delt'],
+      shoulders: ['shoulder', 'overhead', 'press', 'raise', 'delt', 'lateral', 'upright'],
+      arms: ['curl', 'tricep', 'bicep', 'extension', 'pushdown', 'hammer'],
+      legs: ['squat', 'leg press', 'lunges', 'thrust', 'curl', 'extension', 'calf', 'abductor', 'adductor'],
+      core: ['crunch', 'plank', 'abs', 'core', 'hanging leg']
+    };
+    const name = exerciseName.toLowerCase();
+    for(const [group, keywords] of Object.entries(muscles)){
+      if(keywords.some(k => name.includes(k))) return group;
+    }
+    return 'other';
+  }
+  function getPersonalRecords(){
+    const prs = [];
+    Object.keys(state.prs||{}).forEach(key => {
+      const pr = state.prs[key];
+      if(pr.participant === activeProfile){
+        const exerciseName = key.replace(`${activeProfile}_`, '');
+        const muscleGroup = getMuscleGroup(exerciseName);
+        const daysHeld = Math.floor((new Date(getTodayStr()) - new Date(pr.date)) / (1000 * 60 * 60 * 24));
+        prs.push({
+          exercise: exerciseName,
+          weight: pr.weight,
+          date: pr.date,
+          daysHeld,
+          muscleGroup,
+          key
+        });
+      }
+    });
+    return prs.sort((a,b) => b.weight - a.weight);
+  }
   function isSkipped(ds){
     const t=getTodayStr(); if(ds>=t)return false;
     const dow=new Date(ds+"T12:00:00").getDay();
@@ -489,7 +529,7 @@
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); updateLogoColor();
+    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); updateLogoColor();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -563,6 +603,9 @@
     const bw=getBwHistory();
     if(bwChart){bwChart.data.labels=bw.map(x=>x.label);bwChart.data.datasets[0].data=bw.map(x=>x.weight);bwChart.update();}
     else bwChart=new Chart(document.getElementById("bwChart"),{type:"line",data:{labels:bw.map(x=>x.label),datasets:[{label:"kg",data:bw.map(x=>x.weight),borderColor:"#f0c040",backgroundColor:"rgba(240,192,64,0.07)",borderWidth:2.5,pointBackgroundColor:"#f0c040",pointRadius:4,pointHoverRadius:6,tension:0.4,fill:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:false}}}});
+    const sleep=getSleepHistory();
+    if(sleepChart){sleepChart.data.labels=sleep.map(x=>x.label);sleepChart.data.datasets[0].data=sleep.map(x=>x.sleep);sleepChart.update();}
+    else sleepChart=new Chart(document.getElementById("sleepChart"),{type:"line",data:{labels:sleep.map(x=>x.label),datasets:[{label:"hours",data:sleep.map(x=>x.sleep),borderColor:"#7b2d8b",backgroundColor:"rgba(123,45,139,0.07)",borderWidth:2.5,pointBackgroundColor:"#7b2d8b",pointRadius:4,pointHoverRadius:6,tension:0.4,fill:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}}});
   }
 
   function renderWeeklySummary(){
@@ -596,7 +639,7 @@
   function renderHealthChecklist(){
     const el=document.getElementById("health-checklist"); if(!el)return;
     const today=getTodayStr(), p=PROFILES[activeProfile];
-    const h=state.health?.[today]||{water:0,creatine:false,aminos:false,protein:0};
+    const h=state.health?.[today]||{water:0,creatine:false,aminos:false,protein:0,sleep:0};
     const wt=p.water||2.5, pt=p.protein||120;
     const wp=Math.min(100,Math.round((h.water/wt)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
     const ac=PROFILES[activeProfile].color;
@@ -604,10 +647,68 @@
       <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${wt}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">🧪 CREATINE</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS</button></div></div>
       <div class="hi"><div class="hl">🥩 PROTEIN</div><div class="hc"><button class="ha" onclick="adjHealth('protein',-5)">−</button><span class="hv">${h.protein}g / ${pt}g</span><button class="ha" onclick="adjHealth('protein',5)">+</button></div><div class="hbar"><div class="hbf" style="width:${pp}%;background:${ac}"></div></div></div>
+      <div class="hi"><div class="hl">😴 SLEEP</div><div class="hc"><button class="ha" onclick="adjHealth('sleep',-0.5)">−</button><span class="hv">${h.sleep.toFixed(1)}h</span><button class="ha" onclick="adjHealth('sleep',0.5)">+</button></div></div>
     </div>`;
   }
-  window.adjHealth=async function(k,d){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0}; state.health[t][k]=Math.max(0,parseFloat((state.health[t][k]+d).toFixed(2))); renderHealthChecklist(); await saveData(); };
-  window.togHealth=async function(k){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0}; state.health[t][k]=!state.health[t][k]; renderHealthChecklist(); await saveData(); };
+  window.adjHealth=async function(k,d){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0,sleep:0}; state.health[t][k]=Math.max(0,parseFloat((state.health[t][k]+d).toFixed(1))); renderHealthChecklist(); await saveData(); };
+  window.togHealth=async function(k){ const t=getTodayStr(); if(!state.health[t])state.health[t]={water:0,creatine:false,aminos:false,protein:0,sleep:0}; state.health[t][k]=!state.health[t][k]; renderHealthChecklist(); await saveData(); };
+
+  // ─── PERSONAL RECORDS WALL ───
+  let prWallFilter = 'all';
+  function renderPersonalRecordsWall(){
+    const el=document.getElementById("pr-wall"); if(!el)return;
+    const prs = getPersonalRecords();
+    const filteredPrs = prWallFilter === 'all' ? prs : prs.filter(pr => pr.muscleGroup === prWallFilter);
+    const muscleGroups = ['all', 'chest', 'back', 'shoulders', 'arms', 'legs', 'core', 'other'];
+    const ac = PROFILES[activeProfile].color;
+
+    let h = `<div class="prw-header">
+      <div class="prw-title">🏆 PERSONAL RECORDS</div>
+      <div class="prw-filters">`;
+    muscleGroups.forEach(group => {
+      const active = prWallFilter === group;
+      const count = group === 'all' ? prs.length : prs.filter(pr => pr.muscleGroup === group).length;
+      if(count > 0 || group === 'all'){
+        h += `<button class="prw-filter ${active?'active':''}" style="${active?'border-color:'+ac+';color:'+ac:''}" onclick="setPrWallFilter('${group}')">${group.toUpperCase()} (${count})</button>`;
+      }
+    });
+    h += `</div></div>`;
+
+    if(filteredPrs.length === 0){
+      h += `<div class="prw-empty">No personal records yet. Keep lifting! 💪</div>`;
+    } else {
+      h += `<div class="prw-grid">`;
+      filteredPrs.forEach(pr => {
+        const dateStr = new Date(pr.date).toLocaleDateString('en-ZA', {month:'short', day:'numeric', year:'numeric'});
+        const duration = pr.daysHeld === 0 ? 'Today' : pr.daysHeld === 1 ? '1 day' : `${pr.daysHeld} days`;
+        h += `<div class="prw-card">
+          <div class="prw-exercise">${pr.exercise}</div>
+          <div class="prw-weight">${pr.weight}kg</div>
+          <div class="prw-details">
+            <span class="prw-date">${dateStr}</span>
+            <span class="prw-duration">Held for ${duration}</span>
+          </div>
+          <div class="prw-muscle" style="background:${getMuscleColor(pr.muscleGroup)}">${pr.muscleGroup.toUpperCase()}</div>
+        </div>`;
+      });
+      h += `</div>`;
+    }
+
+    el.innerHTML = h;
+  }
+  window.setPrWallFilter = function(filter){ prWallFilter = filter; renderPersonalRecordsWall(); };
+  function getMuscleColor(group){
+    const colors = {
+      chest: '#e85d04',
+      back: '#4361ee',
+      shoulders: '#2ec4b6',
+      arms: '#f72585',
+      legs: '#7b2d8b',
+      core: '#f0c040',
+      other: '#888'
+    };
+    return colors[group] || '#888';
+  }
 
   // ─── DAY PANEL ───
   function renderDayPanel(key){
@@ -1499,6 +1600,29 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .hbar{height:4px;background:rgba(255,255,255,.06);overflow:hidden}
 .hbf{height:100%;transition:width .4s}
 
+/* PERSONAL RECORDS WALL */
+#pr-wall{background:var(--bg3);border:1px solid var(--border);padding:15px}
+.prw-header{display:flex;justify-content:space-between;align-items:flex-start;gap:15px;margin-bottom:15px;flex-wrap:wrap}
+.prw-title{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.16em;font-size:.88rem;color:var(--accent)}
+.prw-filters{display:flex;gap:6px;flex-wrap:wrap}
+.prw-filter{border:1px solid var(--border);background:transparent;color:var(--muted);padding:4px 8px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;letter-spacing:.12em;font-size:.68rem}
+.prw-filter:hover{background:var(--bg4);color:var(--text)}
+.prw-filter.active{background:var(--accent);border-color:var(--accent);color:#000}
+.prw-empty{text-align:center;padding:30px;color:var(--muted);font-style:italic}
+.prw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.prw-card{background:var(--bg2);border:1px solid var(--border);padding:12px;position:relative;overflow:hidden}
+.prw-exercise{font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:.08em;font-size:.9rem;margin-bottom:4px}
+.prw-weight{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.4rem;letter-spacing:.1em;color:var(--accent);margin-bottom:8px}
+.prw-details{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.prw-date{color:var(--muted);font-size:.75rem;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em}
+.prw-duration{color:#888;font-size:.7rem;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em}
+.prw-muscle{position:absolute;top:8px;right:8px;padding:3px 7px;border-radius:3px;color:#fff;font-family:'Barlow Condensed',sans-serif;font-size:.6rem;letter-spacing:.1em;font-weight:700}
+@media(max-width:680px){
+  .prw-grid{grid-template-columns:1fr}
+  .prw-header{flex-direction:column;gap:10px}
+  .prw-filters{justify-content:center}
+}
+
 /* SETTINGS */
 #sto{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.5)}
 #stp{position:fixed;top:0;right:-330px;bottom:0;width:300px;z-index:201;background:var(--bg2);border-left:1px solid var(--border);box-shadow:var(--shadow);transition:right .22s ease;overflow-y:auto}
@@ -1626,6 +1750,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   <div class="sec">// DAILY HEALTH</div>
   <div id="health-checklist"></div>
 
+  <div class="sec">// PERSONAL RECORDS</div>
+  <div id="pr-wall"></div>
+
   <div class="sec" style="margin-bottom:0">// DASHBOARD</div>
   <div class="db-toggle" onclick="toggleDashboard()">
     <span style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.78rem;color:var(--muted)">THIS MONTH · ACTIVITY</span>
@@ -1637,6 +1764,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
       <div class="chart-box"><div class="chart-title">SESSION BREAKDOWN</div><canvas id="volChart"></canvas></div>
       <div class="chart-box"><div class="chart-title">SESSION TONNAGE (kg)</div><canvas id="tonnageChart"></canvas></div>
       <div class="chart-box"><div class="chart-title">BODYWEIGHT TREND (kg)</div><canvas id="bwChart"></canvas></div>
+      <div class="chart-box"><div class="chart-title">SLEEP TREND (hrs)</div><canvas id="sleepChart"></canvas></div>
     </div>
     <div id="heatmap"></div>
   </div>

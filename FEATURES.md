@@ -18,11 +18,10 @@
 - [ ] **Exercise history graph** — tap any exercise name and see a mini line chart of your weight over time. Right now you can't easily tell if you've been progressing on cable flys over 3 months without digging through dates manually.
 - [ ] **1RM calculator** — sits below dashboard Enter your working weight and reps, it estimates your one-rep max using the Epley formula. Good motivator and useful for programming.
 - [ ] **BMI tracker** — alongside bodyweight, include adding or Weekly BMI for tracking
-- [ ] **Personal records wall** — a dedicated section showing every PR you hold, not just a toast notification. Filterable by muscle group. Shows the date and how long you've held it.
 - [ ] **Volume per muscle group chart** — instead of just total tonnage, break it down: how many sets did chest get this week vs back vs legs. Helps spot imbalances.
 - [ ] **Consistency score** — a single number (0–100) based on how many planned sessions you hit vs missed over the last 4 weeks. More motivating than a streak because missing one day doesn't reset everything.
 - [ ] **Month-over-month comparison** — "This month vs last month" card showing volume, sessions, and top PRs side by side.
-- [ ] **Sleep tracker** — log hours slept before each session. Chart it against tonnage. You'll quickly see your worst sessions coincide with bad sleep. Simple but eye-opening data.
+
 - [ ] **Hydration goal scaling** — right now it's a flat target. Should auto-adjust based on session intensity logged that day and whether it's a cardio vs weights day.
 
 ### Low Priority
@@ -37,6 +36,8 @@
 - [x] **Auto-fill last session's weights** — Weight input fields now automatically populate with the last weight used for each exercise when opening a workout. Auto-filled weights are highlighted with a subtle orange tint to distinguish them from manually entered values. Works for both single-user and multi-user sessions.
 - [x] **Exercise swap suggestions** — Swap modal now shows a curated list of common alternative exercises for the same muscle group. Click any suggestion to populate the input field, or type to filter suggestions. Still allows custom exercise names.
 - [x] **Haptic feedback** — Added vibration feedback on mobile devices when checking off exercises (40ms), completing workouts (100-50-100ms pattern), and using quick-log. Includes confetti animation when completing workouts for celebratory feedback. Optimized with CSS for smooth performance.
+- [x] **Sleep tracker** — Added sleep logging to the health checklist with +/- buttons for hours slept. Displays sleep trend chart in dashboard showing correlation with workout performance. Simple but eye-opening data.
+- [x] **Personal records wall** — Added a dedicated section showing every PR you hold with filtering by muscle group. Shows the date achieved and how long you've held each record. Displays weight, exercise name, muscle group badge, and duration held.
 
 ---
 
