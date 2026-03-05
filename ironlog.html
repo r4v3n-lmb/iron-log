@@ -1281,7 +1281,8 @@
           const allChecked=participants.every(pp=>getExData(wo.exercises,pp,ex.name).data?.checked);
           const anyChecked=participants.some(pp=>getExData(wo.exercises,pp,ex.name).data?.checked);
 
-          h+=`<div class="er er-dual ${allChecked?'done':''}">
+          const exId=getExerciseAnimId(ex);
+          h+=`<div class="er er-dual ${allChecked?'done':''}" data-exid="${exId}">
             <div class="enc-dual">
               <span class="en" onclick="showExerciseHistory('${displayName.replace(/'/g, "\\'")}')" style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(232,93,4,0.3);text-underline-offset:2px">${displayName}${anyPR?`<span class="prb">🏆 PR</span>`:''}</span>
               <span class="et-target">${ic?ex.reps:`${ex.sets}×${ex.reps}`}</span>
@@ -1333,7 +1334,8 @@
           const ol=ic?null:getOverloadSuggestion(key,ex,part);
           const olb=ol?`<span class="olb">⬆ Try ${ol.suggestedWeight}kg</span>`:'';
           const dis=!isEditable?'disabled':'';
-          h+=`<div class="er ${ed.checked?'done':''}">
+          const exId=getExerciseAnimId(ex);
+          h+=`<div class="er ${ed.checked?'done':''}" data-exid="${exId}">
             <label class="eck"><input type="checkbox" ${ed.checked?'checked':''} ${dis} onchange="togEx('${key}','${exKey}',this.checked)"><span class="ecm" style="--c:${day.color}"></span></label>
             <div class="enc">
               <span class="en" onclick="showExerciseHistory('${displayName.replace(/'/g, "\\'")}')" style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(232,93,4,0.3);text-underline-offset:2px">${displayName}${prb}</span>
@@ -1412,14 +1414,58 @@
     renderCharts(); await saveData(); toast(`⚖️ ${PROFILES[participant]?.label||participant}: ${w}kg`);
   };
 
+  function getExerciseAnimId(ex){
+    if(!ex || typeof ex!=="object") return "";
+    if(!Object.prototype.hasOwnProperty.call(ex,"_animId")){
+      const id=`ex_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,8)}`;
+      try{
+        Object.defineProperty(ex,"_animId",{value:id,writable:true,configurable:true,enumerable:false});
+      }catch(e){
+        ex._animId=id;
+      }
+    }
+    return ex._animId;
+  }
+
   // ── LIVE EXERCISE REORDER ──
   window.moveExLive=async function(key,index,dir){
     const exs=WORKOUT_PLAN[key].exercises;
     const ni=index+dir;
     if(ni<0||ni>=exs.length)return;
+
+    const panelBefore=document.getElementById("day-panel");
+    const firstPos=new Map();
+    if(panelBefore){
+      panelBefore.querySelectorAll(".el .er[data-exid]").forEach(row=>{
+        firstPos.set(row.dataset.exid,row.getBoundingClientRect().top);
+      });
+    }
+
     [exs[index],exs[ni]]=[exs[ni],exs[index]];
     const sy=window.scrollY;
-    renderDayPanel(key); window.scrollTo(0,sy);
+    renderDayPanel(key);
+    window.scrollTo(0,sy);
+
+    const panelAfter=document.getElementById("day-panel");
+    if(panelAfter && firstPos.size){
+      panelAfter.querySelectorAll(".el .er[data-exid]").forEach(row=>{
+        const prevTop=firstPos.get(row.dataset.exid);
+        if(prevTop===undefined) return;
+        const dy=prevTop-row.getBoundingClientRect().top;
+        if(Math.abs(dy)<1) return;
+        row.style.transition="none";
+        row.style.transform=`translateY(${dy}px)`;
+        requestAnimationFrame(()=>{
+          row.style.transition="transform .24s cubic-bezier(.22,.61,.36,1)";
+          row.style.transform="translateY(0)";
+        });
+        row.addEventListener("transitionend",()=>{
+          row.style.transition="";
+          row.style.transform="";
+        },{once:true});
+      });
+    }
+
     await saveData();
   };
 

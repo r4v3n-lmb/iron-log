@@ -1,6 +1,6 @@
 {
   "name": "ironlog",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Workout tracking app with Firebase",
   "type": "module",
   "scripts": {
