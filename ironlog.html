@@ -22,6 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
+  const APP_VERSION = "v1.0.0";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -318,6 +319,10 @@
   function updateLogoColor(){
     const el=document.querySelector(".logo-log");
     if(el) el.style.color=PROFILES[activeProfile].color;
+  }
+  function renderAppVersion(){
+    const el = document.getElementById("app-version");
+    if(el) el.textContent = APP_VERSION;
   }
 
   // ─── HELPERS ───
@@ -1943,7 +1948,7 @@
   window.resetGymUrl=function(){ state.gymUrl=""; saveData(); toast("🗺 Gym URL cleared"); };
 
   // ─── SETTINGS ─────
-  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); };
+  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
@@ -2023,6 +2028,7 @@
     if(th==="light")document.documentElement.classList.add("light-mode");
     document.getElementById("cii").addEventListener("change",handleCsvImport);
     document.getElementById("sto").addEventListener("click",closeSettings);
+    renderAppVersion();
     updateLogoColor(); updateClock(); setInterval(updateClock,1000);
     initSwipeGestures(); // Initialize swipe gestures for mobile
     renderSettingsProfiles(); loadData();
@@ -2344,6 +2350,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .th-btns{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .th-btn{border:1px solid var(--border);background:var(--bg3);color:var(--muted);padding:7px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;letter-spacing:.12em;font-size:.75rem;text-align:center}
 .th-btn:hover{background:var(--bg4);color:var(--text)}
+.version-row{font-family:'Barlow Condensed',sans-serif;font-size:.82rem;letter-spacing:.12em;color:var(--text);padding:8px 10px;background:var(--bg3);border:1px solid var(--border)}
 
 /* TEMPLATES */
 .template-item{display:flex;justify-content:space-between;align-items:center;padding:11px;background:var(--bg2);border:1px solid var(--border);margin-bottom:5px;border-radius:3px}
@@ -2543,6 +2550,10 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
       <button class="th-btn" onclick="setTheme('dark')">🌙 DARK</button>
       <button class="th-btn" onclick="setTheme('light')">☀️ LIGHT</button>
     </div>
+  </div>
+  <div class="sts">
+    <div class="stst">// VERSION</div>
+    <div class="version-row">IRON LOG <span id="app-version">v0.0.0</span></div>
   </div>
 </div>
 
