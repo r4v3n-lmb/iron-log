@@ -381,6 +381,46 @@
     while(true){ const ds=d.toISOString().split("T")[0]; if(state.workouts?.[ds]&&Object.values(state.workouts[ds]).some(x=>x.done)){s++;d.setDate(d.getDate()-1);}else break; }
     return s;
   }
+
+  function calcConsistencyScore(){
+    const today = new Date(getTodayStr() + "T12:00:00");
+    let planned = 0, completed = 0;
+
+    // Check last 28 days
+    for (let i = 0; i < 28; i++) {
+      const checkDate = new Date(today);
+      checkDate.setDate(today.getDate() - i);
+      const dateStr = checkDate.toISOString().split("T")[0];
+
+      // Skip future dates
+      if (dateStr > getTodayStr()) continue;
+
+      // Get weekday (0 = Sunday, 1 = Monday, etc.)
+      const weekday = checkDate.getDay();
+      // Convert to 1-7 (Sunday = 7, Monday = 1, etc.) to match WORKOUT_PLAN
+      const planWeekday = weekday === 0 ? 7 : weekday;
+
+      // Find planned workouts for this weekday
+      const plannedKeys = Object.keys(WORKOUT_PLAN).filter(key =>
+        WORKOUT_PLAN[key].weekday === planWeekday &&
+        WORKOUT_PLAN[key].participants.includes(activeProfile)
+      );
+
+      if (plannedKeys.length > 0) {
+        planned += plannedKeys.length;
+        // Check if any of these planned workouts were completed
+        const dayWorkouts = state.workouts?.[dateStr];
+        if (dayWorkouts) {
+          plannedKeys.forEach(key => {
+            if (dayWorkouts[key]?.done) completed++;
+          });
+        }
+      }
+    }
+
+    // Return score as 0-100
+    return planned > 0 ? Math.round((completed / planned) * 100) : 0;
+  }
   function getWeeklyFreq(){
     const w=["Wk 1","Wk 2","Wk 3","Wk 4"],c=[0,0,0,0],p=getMonthKey();
     Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; const i=Math.min(Math.floor((new Date(d+"T12:00:00").getDate()-1)/7),3); if(Object.values(state.workouts[d]).some(x=>x.done))c[i]++; });
@@ -545,7 +585,7 @@
   function renderStats(){
     document.getElementById("stat-days").textContent=getDaysWorkedThisMonth();
     document.getElementById("stat-ex").textContent=getTotalExDoneThisMonth();
-    document.getElementById("stat-streak").textContent=calcStreak();
+    document.getElementById("stat-consistency").textContent=calcConsistencyScore();
     let t=0; const p=getMonthKey();
     Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>t+=calcSessionTonnage(d,k)); });
     const el=document.getElementById("stat-tonnage");
@@ -1875,7 +1915,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   <div class="stat"><div class="sn" id="stat-days">0</div><div class="sl">DAYS / MONTH</div></div>
   <div class="stat"><div class="sn" id="stat-ex">0</div><div class="sl">EXERCISES DONE</div></div>
   <div class="stat"><div class="sn" id="stat-tonnage">0</div><div class="sl">MONTHLY VOLUME</div></div>
-  <div class="stat"><div class="sn" id="stat-streak">0</div><div class="sl">DAY STREAK</div></div>
+  <div class="stat"><div class="sn" id="stat-consistency">0</div><div class="sl">CONSISTENCY %</div></div>
 </div>
 
 <div class="main">

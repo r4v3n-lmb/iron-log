@@ -19,7 +19,6 @@
 - [ ] **1RM calculator** — sits below dashboard Enter your working weight and reps, it estimates your one-rep max using the Epley formula. Good motivator and useful for programming.
 - [ ] **BMI tracker** — alongside bodyweight, include adding or Weekly BMI for tracking
 - [ ] **Volume per muscle group chart** — instead of just total tonnage, break it down: how many sets did chest get this week vs back vs legs. Helps spot imbalances.
-- [ ] **Consistency score** — a single number (0–100) based on how many planned sessions you hit vs missed over the last 4 weeks. More motivating than a streak because missing one day doesn't reset everything.
 - [ ] **Month-over-month comparison** — "This month vs last month" card showing volume, sessions, and top PRs side by side.
 
 - [ ] **Hydration goal scaling** — right now it's a flat target. Should auto-adjust based on session intensity logged that day and whether it's a cardio vs weights day.
@@ -37,6 +36,7 @@
 - [x] **Haptic feedback** — Added vibration feedback on mobile devices when checking off exercises (40ms), completing workouts (100-50-100ms pattern), and using quick-log. Includes confetti animation when completing workouts for celebratory feedback. Optimized with CSS for smooth performance.
 - [x] **Sleep tracker** — Added sleep logging to the health checklist with +/- buttons for hours slept. Displays sleep trend chart in dashboard showing correlation with workout performance. Simple but eye-opening data.
 - [x] **Personal records wall** — Added a dedicated section showing every PR you hold with filtering by muscle group. Shows the date achieved and how long you've held each record. Displays weight, exercise name, muscle group badge, and duration held.
+- [x] **Consistency score** — Added a 0-100 consistency score in the stats bar showing percentage of planned workouts completed over the last 4 weeks. More motivating than streaks since missing one day doesn't reset progress.
 
 ---
 
