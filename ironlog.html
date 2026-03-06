@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.21";
+  const APP_VERSION = "v1.0.22";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -72,14 +72,14 @@
   let lastUpdateToastVersion = "";
   let managementTab = "exercises";
   let settingsSectionState = {
-    user: true,
+    user: false,
     data: false,
-    management: true,
+    management: false,
     admin: false,
     debug: false,
     templates: false,
     theme: false,
-    version: true
+    version: false
   };
   let authInitialized = false;
   const THEME_COLORS = ["#f72585","#4361ee","#2ec4b6","#7b2d8b","#f0c040","#5cba5c","#ef4444","#14b8a6","#3b82f6"];
@@ -2645,7 +2645,14 @@
     const el=document.getElementById("admin-settings-block");
     if(el) el.style.display=isAdminUser() ? "block" : "none";
   }
-  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderSettingsSectionUI(); };
+  window.openSettings=function(){
+    settingsSectionState = {
+      user:false,data:false,management:false,admin:false,debug:false,templates:false,theme:false,version:false
+    };
+    document.getElementById("stp").classList.add("open");
+    document.getElementById("sto").style.display="block";
+    renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderSettingsSectionUI();
+  };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
