@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.18";
+  const APP_VERSION = "v1.0.19";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -2633,16 +2633,20 @@
     tabsEl.innerHTML=tabs.map(([id,label])=>`<button class="th-btn ${managementTab===id?'active':''}" onclick="setManagementTab('${id}')">${label}</button>`).join('');
     if(managementTab==="workouts"){
       const items=sortedDayKeys();
-      bodyEl.innerHTML=items.length?items.map(k=>{
+      bodyEl.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
+        <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;color:var(--muted);font-size:.76rem">${items.length} WORKOUT DAY${items.length===1?'':'S'}</div>
+        <button class="st-ab" style="width:auto;margin:0;color:#5cba5c;border-color:rgba(92,186,92,.35)" onclick="closeSettings();setTimeout(()=>openAddDay(),60)">+ ADD WORKOUT DAY</button>
+      </div>` + (items.length?items.map(k=>{
         const d=WORKOUT_PLAN[k];
         return `<div class="template-item"><span class="template-name">${d.label} · ${d.title}</span><div class="template-btns"><button class="template-btn-load" onclick="closeSettings();setTimeout(()=>openEdit('${k}'),60)">EDIT</button><button class="template-btn-del" onclick="deleteDay('${k}')">DELETE</button></div></div>`;
-      }).join(''):`<div style="color:var(--muted);font-size:.8rem;padding:10px">No workouts found.</div>`;
+      }).join(''):`<div style="color:var(--muted);font-size:.8rem;padding:10px">No workouts found yet.</div>`);
       return;
     }
     if(managementTab==="exercises"){
       const names=getAllExerciseNames();
       const opts=names.map(n=>`<option value="${n.replace(/"/g,'&quot;')}"></option>`).join('');
       bodyEl.innerHTML=`<div style="display:flex;flex-direction:column;gap:8px">
+        <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;color:var(--muted);font-size:.76rem">${names.length} EXERCISE${names.length===1?'':'S'} AVAILABLE</div>
         <input id="mgx-name" class="fi" list="mgx-options" placeholder="Select or type exercise name" oninput="loadExerciseMetaEditor(this.value)">
         <datalist id="mgx-options">${opts}</datalist>
         <select id="mgx-group" class="fsel">
@@ -2652,6 +2656,10 @@
         <input id="mgx-note" class="fi" placeholder="Description / notes (optional)">
         <button class="st-ab" onclick="saveExerciseMetaFromEditor()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">SAVE EXERCISE ATTRIBUTES</button>
         <button class="st-ab" onclick="clearExerciseMetaFromEditor()">CLEAR OVERRIDE</button>
+        <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;color:var(--muted);font-size:.74rem;margin-top:4px">CURRENT EXERCISES</div>
+        <div style="max-height:180px;overflow:auto;border:1px solid var(--border);background:var(--bg2);padding:6px">
+          ${names.length?names.map(n=>`<button class="st-ab" style="margin:0 0 4px 0;font-size:.72rem;letter-spacing:.08em;padding:6px 8px" onclick="selectManagementExercise('${n.replace(/'/g,"\\'")}')">${n}</button>`).join(''):`<div style="color:var(--muted);font-size:.78rem;padding:6px">No exercises found.</div>`}
+        </div>
       </div>`;
       return;
     }
@@ -2660,14 +2668,14 @@
       return `<div style="border:1px solid var(--border);padding:8px;margin-bottom:8px">
         <div style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;color:${p.color};margin-bottom:6px">${p.label}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-          <input id="mgu-${pk}-height" class="fi" type="number" min="120" max="230" placeholder="Height cm" value="${p.height||''}">
+          <div><div class="auth-field-label">HEIGHT (CM)</div><input id="mgu-${pk}-height" class="fi" type="number" min="120" max="230" placeholder="e.g. 180" value="${p.height||''}"></div>
           <div>
             <input id="mgu-${pk}-color" type="hidden" value="${p.color||''}">
             <div class="auth-field-label">THEME COLOUR</div>
             <div id="mgu-${pk}-color-swatches" class="color-swatches"></div>
           </div>
-          <input id="mgu-${pk}-water" class="fi" type="number" step="0.1" min="1" max="8" placeholder="Water target L" value="${p.water||''}">
-          <input id="mgu-${pk}-protein" class="fi" type="number" min="20" max="400" placeholder="Protein target g" value="${p.protein||''}">
+          <div><div class="auth-field-label">WATER TARGET (L)</div><input id="mgu-${pk}-water" class="fi" type="number" step="0.1" min="1" max="8" placeholder="e.g. 2.5" value="${p.water||''}"></div>
+          <div><div class="auth-field-label">PROTEIN TARGET (G)</div><input id="mgu-${pk}-protein" class="fi" type="number" min="20" max="400" placeholder="e.g. 160" value="${p.protein||''}"></div>
         </div>
         <div style="display:flex;gap:6px;margin-top:7px">
           <button class="st-ab" onclick="saveUserOverridesFromEditor('${pk}')" style="margin:0">SAVE ${p.label}</button>
@@ -2679,6 +2687,12 @@
       renderThemeColorPicker(`mgu-${pk}-color-swatches`,`mgu-${pk}-color`,PROFILES[pk]?.color||"#e85d04");
     });
   }
+  window.selectManagementExercise=function(name){
+    const input=document.getElementById("mgx-name");
+    if(!input) return;
+    input.value=name;
+    loadExerciseMetaEditor(name);
+  };
   window.loadExerciseMetaEditor=function(name){
     const key=normalizeExerciseName(name);
     const meta=state.exerciseMeta?.[key]||{};
