@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>IRON LOG</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect x='10' y='42' width='80' height='16' rx='3' fill='%23e85d04'/><rect x='5' y='30' width='15' height='40' rx='3' fill='%23e85d04'/><rect x='80' y='30' width='15' height='40' rx='3' fill='%23e85d04'/><rect x='0' y='36' width='10' height='28' rx='2' fill='%23e85d04'/><rect x='90' y='36' width='10' height='28' rx='2' fill='%23e85d04'/></svg>">
+<link rel="icon" type="image/png" href="iron_log_logo.png">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script type="module">
@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.25";
+  const APP_VERSION = "v1.0.26";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -71,6 +71,10 @@
   let latestAppUpdatedAt = "";
   let lastUpdateToastVersion = "";
   let managementTab = "exercises";
+  let adminFilterQuery = "";
+  let adminFilterUser = "all";
+  let adminDateFrom = "";
+  let adminDateTo = "";
   let settingsSectionState = {
     user: false,
     data: false,
@@ -568,6 +572,34 @@
     const p=PROFILES[activeProfile];
     if(el && p) el.style.color=p.color;
   }
+  window.openTodayWorkout=function(){
+    const todayKey=getTodayDayKey();
+    if(!todayKey){
+      toast("No workout planned for today");
+      return;
+    }
+    selectDay(todayKey);
+    window.scrollTo({top:0,behavior:"smooth"});
+  };
+  window.openAddWorkoutQuick=function(){
+    openAddDay();
+  };
+  window.openUpdateQuick=async function(){
+    openSettings();
+    settingsSectionState.version=true;
+    renderSettingsSectionUI();
+    await checkForAppUpdate();
+  };
+  window.focusStat=function(kind){
+    if(kind==="days" || kind==="ex"){
+      window.scrollTo({top:document.getElementById("calendar")?.offsetTop-90||0,behavior:"smooth"});
+      return;
+    }
+    if(kind==="tonnage" || kind==="consistency"){
+      if(!dashboardOpen) toggleDashboard();
+      setTimeout(()=>document.getElementById("dbp")?.scrollIntoView({behavior:"smooth",block:"start"}),120);
+    }
+  };
   function normalizeExerciseName(name){
     return String(name||"").trim().toLowerCase();
   }
@@ -1025,7 +1057,7 @@
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor();
+    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -2646,6 +2678,10 @@
     const el=document.getElementById("admin-settings-block");
     if(el) el.style.display=isAdminUser() ? "block" : "none";
   }
+  function renderQuickActions(){
+    const adminBtn=document.getElementById("qbar-admin-btn");
+    if(adminBtn) adminBtn.style.display=isAdminUser()?"block":"none";
+  }
   window.openSettings=function(){
     settingsSectionState = {
       user:false,data:false,management:false,admin:false,debug:false,templates:false,theme:false,version:false
@@ -2838,6 +2874,27 @@
       <div class="adm-table-wrap"><table class="adm-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
     </section>`;
   }
+  function applyAdminFilters(rows){
+    const q=String(adminFilterQuery||"").trim().toLowerCase();
+    return rows.filter(r=>{
+      if(adminFilterUser!=="all" && String(r.user||r.key||"").toLowerCase()!==adminFilterUser.toLowerCase()) return false;
+      const d=String(r.date||"");
+      if(adminDateFrom && d && d<adminDateFrom) return false;
+      if(adminDateTo && d && d>adminDateTo) return false;
+      if(q){
+        const hay=Object.values(r).map(v=>String(v??"").toLowerCase()).join(" ");
+        if(!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+  window.setAdminFiltersFromUi=function(){
+    adminFilterQuery=(document.getElementById("adm-filter-q")?.value||"").trim();
+    adminFilterUser=(document.getElementById("adm-filter-user")?.value||"all").trim();
+    adminDateFrom=(document.getElementById("adm-filter-from")?.value||"").trim();
+    adminDateTo=(document.getElementById("adm-filter-to")?.value||"").trim();
+    refreshAdminDataTables();
+  };
   window.closeAdminDataPage=function(){
     const el=document.getElementById("admin-page");
     if(el) el.style.display="none";
@@ -2981,6 +3038,12 @@
       const totalMeasured=usersBytes+workoutsBytes+exercisesBytes+collectedBytes;
       const estimatedFree=Math.max(0,FIRESTORE_SPARK_LIMIT_BYTES-totalMeasured);
       const usagePct=((totalMeasured/FIRESTORE_SPARK_LIMIT_BYTES)*100).toFixed(2);
+      const filteredUsers=applyAdminFilters(userRows);
+      const filteredWorkouts=applyAdminFilters(workoutRows);
+      const filteredExercises=applyAdminFilters(exerciseRows);
+      const filteredCollected=applyAdminFilters(collectedRows);
+      const allUsers=Array.from(new Set([...Object.keys(accounts),...Object.keys(profileData)])).sort();
+      const userOptions=['<option value="all">ALL USERS</option>',...allUsers.map(u=>`<option value="${u}" ${adminFilterUser===u?'selected':''}>${u.toUpperCase()}</option>`)].join("");
 
       root.innerHTML = `
         <section class="adm-card">
@@ -2993,10 +3056,19 @@
           </div>
           <div style="margin-top:8px;color:var(--muted);font-size:.72rem;letter-spacing:.06em">Estimate based on loaded table payloads, not exact Firestore storage billing/index size.</div>
         </section>
-        ${buildTable("Users",["key","name","pin","height_cm","water_l","protein_g","color","created_at"],userRows,usersBytes)}
-        ${buildTable("Workouts",["user","date","day_key","done","exercise_entries","note"],workoutRows,workoutsBytes)}
-        ${buildTable("Exercises",["user","exercise","source","sets","reps","muscle_group"],exerciseRows,exercisesBytes)}
-        ${buildTable("Collected Data",["user","date","type","value","water_l","protein_g","sleep_h","soreness"],collectedRows,collectedBytes)}
+        <section class="adm-card">
+          <div class="adm-title">FILTERS</div>
+          <div class="adm-filters">
+            <input id="adm-filter-q" class="fi" placeholder="Search across tables..." value="${escHtml(adminFilterQuery)}" oninput="setAdminFiltersFromUi()">
+            <select id="adm-filter-user" class="fsel" onchange="setAdminFiltersFromUi()">${userOptions}</select>
+            <input id="adm-filter-from" class="fi" type="date" value="${escHtml(adminDateFrom)}" onchange="setAdminFiltersFromUi()">
+            <input id="adm-filter-to" class="fi" type="date" value="${escHtml(adminDateTo)}" onchange="setAdminFiltersFromUi()">
+          </div>
+        </section>
+        ${buildTable("Users",["key","name","pin","height_cm","water_l","protein_g","color","created_at"],filteredUsers,usersBytes)}
+        ${buildTable("Workouts",["user","date","day_key","done","exercise_entries","note"],filteredWorkouts,workoutsBytes)}
+        ${buildTable("Exercises",["user","exercise","source","sets","reps","muscle_group"],filteredExercises,exercisesBytes)}
+        ${buildTable("Collected Data",["user","date","type","value","water_l","protein_g","sleep_h","soreness"],filteredCollected,collectedBytes)}
       `;
     }catch(e){
       root.innerHTML=`<div style="color:#ff9b9b;padding:12px">Failed to load admin data.</div>`;
@@ -3116,6 +3188,8 @@ button,input,select,textarea{font:inherit}
 /* HEADER */
 .hdr{display:flex;justify-content:space-between;align-items:center;padding:11px 20px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;gap:12px}
 .logo{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.65rem;letter-spacing:.18em;flex-shrink:0}
+.logo-brand{display:flex;align-items:center;gap:8px}
+.logo-img{width:28px;height:28px;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
 .logo-log{color:var(--accent);transition:color .3s}
 .hdr-center{flex:1;display:flex;justify-content:center}
 #header-datetime{font-family:'Barlow Condensed',sans-serif;font-size:.7rem;letter-spacing:.12em;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:1px}
@@ -3174,11 +3248,15 @@ html.light-mode .auth-msg{color:#b42318}
 /* STATS */
 .sbar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 20px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,var(--bg2),transparent)}
 .stat{background:var(--bg3);border:1px solid var(--border);padding:11px 13px}
+.stat{cursor:pointer;transition:background .12s,border-color .12s,transform .12s}
+.stat:hover{background:var(--bg4);transform:translateY(-1px);border-color:rgba(232,93,4,.35)}
 .sn{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.35rem;letter-spacing:.06em}
 .sl{margin-top:2px;color:var(--muted);font-family:'Barlow Condensed',sans-serif;font-size:.74rem;letter-spacing:.1em;line-height:1.25}
 
 /* MAIN */
 .main{max-width:1120px;margin:auto;padding:16px 20px}
+.qbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.qbtn{margin:0;text-align:center}
 .sec{margin:18px 0 9px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.11em;font-size:.78rem;color:var(--muted);line-height:1.25}
 
 /* DAY GRID */
@@ -3493,6 +3571,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .adm-table{width:100%;border-collapse:collapse;font-size:.78rem}
 .adm-table th,.adm-table td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;white-space:nowrap}
 .adm-table th{position:sticky;top:0;background:var(--bg2);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.72rem;color:var(--muted)}
+.adm-filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px}
 
 /* TEMPLATES */
 .template-item{display:flex;justify-content:space-between;align-items:center;padding:11px;background:var(--bg2);border:1px solid var(--border);margin-bottom:5px;border-radius:3px}
@@ -3553,6 +3632,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   #header-datetime{font-size:.7rem;letter-spacing:.06em}
   .htime{font-size:.76rem}
   .main{padding:11px}
+  .qbar{grid-template-columns:repeat(2,minmax(0,1fr))}
   #day-grid{grid-template-columns:repeat(2,1fr)}
   .phr{flex-direction:column;align-items:flex-start;gap:5px}
   .er{flex-wrap:wrap;gap:5px}
@@ -3579,7 +3659,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
 @media(max-width:440px){
   .logo{font-size:1.25rem}
+  .logo-img{width:24px;height:24px}
   #day-grid{grid-template-columns:1fr 1fr}
+  .adm-filters{grid-template-columns:1fr}
 }
 
 /* CONFETTI ANIMATION */
@@ -3596,7 +3678,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 <div id="auth-gate">
   <div class="auth-card">
     <div id="auth-home" class="auth-home">
-      <div class="auth-title">IRON <span class="auth-log">LOG</span></div>
+      <div class="auth-title"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON <span class="auth-log">LOG</span></span></div>
       <div class="auth-sub">Choose an option to continue.</div>
       <div class="auth-actions">
         <button class="st-ab" onclick="showAuthMode('signin')">SIGN IN</button>
@@ -3634,7 +3716,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
 <div id="admin-page">
   <div class="adm-head">
-    <div class="adm-title-main">IRON <span class="logo-log">LOG</span> · ADMIN DATA</div>
+    <div class="adm-title-main"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON <span class="logo-log">LOG</span></span> · ADMIN DATA</div>
     <div class="adm-actions">
       <button class="st-ab" style="width:auto;margin:0" onclick="refreshAdminDataTables()">REFRESH</button>
       <button class="st-ab" style="width:auto;margin:0" onclick="closeAdminDataPage()">CLOSE</button>
@@ -3645,7 +3727,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
 <!-- HEADER -->
 <div class="hdr">
-  <div class="logo">IRON<span class="logo-log">LOG</span></div>
+  <div class="logo"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON<span class="logo-log">LOG</span></span></div>
   <div class="hdr-center"><div id="header-datetime"></div></div>
   <div class="hdr-right">
     <button class="hdr-icn-btn" onclick="openSettings()" title="Settings">☰</button>
@@ -3654,13 +3736,19 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
 <!-- STATS -->
 <div class="sbar">
-  <div class="stat"><div class="sn" id="stat-days">0</div><div class="sl">DAYS / MONTH</div></div>
-  <div class="stat"><div class="sn" id="stat-ex">0</div><div class="sl">EXERCISES DONE</div></div>
-  <div class="stat"><div class="sn" id="stat-tonnage">0</div><div class="sl">MONTHLY VOLUME</div></div>
-  <div class="stat"><div class="sn" id="stat-consistency">0</div><div class="sl">CONSISTENCY %</div></div>
+  <div class="stat" onclick="focusStat('days')" title="Jump to calendar"><div class="sn" id="stat-days">0</div><div class="sl">DAYS / MONTH</div></div>
+  <div class="stat" onclick="focusStat('ex')" title="Jump to calendar"><div class="sn" id="stat-ex">0</div><div class="sl">EXERCISES DONE</div></div>
+  <div class="stat" onclick="focusStat('tonnage')" title="Open dashboard"><div class="sn" id="stat-tonnage">0</div><div class="sl">MONTHLY VOLUME</div></div>
+  <div class="stat" onclick="focusStat('consistency')" title="Open dashboard"><div class="sn" id="stat-consistency">0</div><div class="sl">CONSISTENCY %</div></div>
 </div>
 
 <div class="main">
+  <div class="qbar">
+    <button class="st-ab qbtn" onclick="openTodayWorkout()">▶ START TODAY</button>
+    <button class="st-ab qbtn" onclick="openAddWorkoutQuick()">＋ ADD WORKOUT</button>
+    <button class="st-ab qbtn" onclick="openUpdateQuick()">⬆ CHECK UPDATE</button>
+    <button class="st-ab qbtn" id="qbar-admin-btn" style="display:none" onclick="openAdminDataPage()">📊 ADMIN DATA</button>
+  </div>
   <div id="weekly-summary" style="display:none"></div>
 
   <div class="sec">// SELECT WORKOUT</div>
