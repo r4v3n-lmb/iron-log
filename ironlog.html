@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, doc, setDoc, getDoc, onSnapshot, deleteField } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, getDoc, getDocFromServer, onSnapshot, deleteField } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDwkvvVwJbk3JC_ddej74sFOxgPBl2ccE8",
@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.17";
+  const APP_VERSION = "v1.0.18";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -100,7 +100,12 @@
   async function loadAccounts(){
     try{
       const ref = doc(db,"ironlog",ACCOUNTS_DOC);
-      const snap = await getDoc(ref);
+      let snap;
+      try{
+        snap = await getDocFromServer(ref);
+      }catch(_e){
+        snap = await getDoc(ref);
+      }
       if(snap.exists() && snap.data()?.users && Object.keys(snap.data().users).length){
         accountRegistry = snap.data().users;
       } else {
@@ -237,7 +242,10 @@
     await finalizeSignedInUser(pk);
   };
   window.signOutAccount=function(){
-    location.reload();
+    const u=new URL(window.location.href);
+    u.searchParams.set("v", APP_VERSION);
+    u.searchParams.set("t", String(Date.now()));
+    window.location.href=u.toString();
   };
 
   // ─── SESSION PARTICIPANTS ───
@@ -2663,7 +2671,7 @@
         </div>
         <div style="display:flex;gap:6px;margin-top:7px">
           <button class="st-ab" onclick="saveUserOverridesFromEditor('${pk}')" style="margin:0">SAVE ${p.label}</button>
-          ${pk!=="revan" ? `<button class="st-ab" onclick="deleteUserAccount('${pk}')" style="margin:0;color:#ff9b9b;border-color:rgba(255,120,120,.35)">DELETE</button>` : ``}
+          ${canManageWorkoutParticipants() && pk!=="revan" ? `<button class="st-ab" onclick="deleteUserAccount('${pk}')" style="margin:0;color:#ff9b9b;border-color:rgba(255,120,120,.35)">DELETE</button>` : ``}
         </div>
       </div>`;
     }).join('');
