@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.9";
+  const APP_VERSION = "v1.0.10";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -123,6 +123,30 @@
     const el=document.getElementById("auth-msg");
     if(el) el.textContent=msg||"";
   }
+  window.showAuthMode=function(mode){
+    const home=document.getElementById("auth-home");
+    const grid=document.getElementById("auth-grid");
+    const signIn=document.getElementById("auth-signin-pane");
+    const signUp=document.getElementById("auth-signup-pane");
+    if(!home||!grid||!signIn||!signUp) return;
+    if(mode==="signin"){
+      home.style.display="none";
+      grid.style.display="grid";
+      signIn.style.display="block";
+      signUp.style.display="none";
+    } else if(mode==="signup"){
+      home.style.display="none";
+      grid.style.display="grid";
+      signIn.style.display="none";
+      signUp.style.display="block";
+    } else {
+      home.style.display="block";
+      grid.style.display="none";
+      signIn.style.display="none";
+      signUp.style.display="none";
+      showAuthError("");
+    }
+  };
   function renderAuthUsers(){
     const sel=document.getElementById("auth-user-select");
     if(!sel) return;
@@ -2712,6 +2736,7 @@
     document.body.classList.add("auth-locked");
     await loadAccounts();
     renderAuthUsers();
+    showAuthMode("home");
     const gate=document.getElementById("auth-gate");
     if(gate) gate.style.display="flex";
   }
@@ -2756,15 +2781,19 @@ body.auth-locked .sbar,
 body.auth-locked .main{display:none}
 #auth-gate{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:20px;background:radial-gradient(circle at top right,rgba(232,93,4,.18),transparent 55%),var(--bg)}
 .auth-card{width:100%;max-width:760px;background:var(--bg2);border:1px solid var(--border);box-shadow:var(--shadow);padding:18px}
-.auth-title{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.18em;font-size:1.15rem}
+.auth-title{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.18em;font-size:1.35rem}
 .auth-sub{margin-top:4px;color:var(--muted);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.82rem}
 .auth-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
 .auth-pane{border:1px solid var(--border);background:var(--bg3);padding:12px}
 .auth-h{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.13em;font-size:.86rem;color:var(--muted);margin-bottom:8px}
 .auth-msg{margin-top:10px;min-height:18px;color:#ff9b9b;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.78rem}
 .auth-pane .fi,.auth-pane .fsel{margin-bottom:7px}
+.auth-home{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:220px}
+.auth-actions{display:flex;gap:10px}
+.auth-back{margin-top:6px}
 @media(max-width:760px){
   .auth-grid{grid-template-columns:1fr}
+  .auth-actions{flex-direction:column;width:100%}
 }
 
 /* STATS */
@@ -3165,16 +3194,23 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
 <div id="auth-gate">
   <div class="auth-card">
-    <div class="auth-title">IRON LOG ACCESS</div>
-    <div class="auth-sub">Sign in with an existing account or create a new one.</div>
-    <div class="auth-grid">
-      <div class="auth-pane">
+    <div id="auth-home" class="auth-home">
+      <div class="auth-title">IRON LOG</div>
+      <div class="auth-sub">Choose an option to continue.</div>
+      <div class="auth-actions">
+        <button class="st-ab" onclick="showAuthMode('signin')">SIGN IN</button>
+        <button class="st-ab" onclick="showAuthMode('signup')">SIGN UP</button>
+      </div>
+    </div>
+    <div id="auth-grid" class="auth-grid" style="display:none">
+      <div id="auth-signin-pane" class="auth-pane" style="display:none">
         <div class="auth-h">SIGN IN</div>
         <select id="auth-user-select" class="fsel"></select>
         <input id="auth-pin" class="fi" type="password" inputmode="numeric" placeholder="PIN">
         <button class="st-ab" onclick="signInAccount()">SIGN IN</button>
+        <button class="st-ab auth-back" onclick="showAuthMode('home')">BACK</button>
       </div>
-      <div class="auth-pane">
+      <div id="auth-signup-pane" class="auth-pane" style="display:none">
         <div class="auth-h">SIGN UP</div>
         <input id="signup-name" class="fi" placeholder="Name">
         <input id="signup-pin" class="fi" type="password" inputmode="numeric" placeholder="PIN">
@@ -3183,6 +3219,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
         <input id="signup-water" class="fi" type="number" step="0.1" min="1" max="8" placeholder="Water target L (optional)">
         <input id="signup-protein" class="fi" type="number" min="20" max="400" placeholder="Protein target g (optional)">
         <button class="st-ab" onclick="signUpAccount()">CREATE ACCOUNT</button>
+        <button class="st-ab auth-back" onclick="showAuthMode('home')">BACK</button>
       </div>
     </div>
     <div id="auth-msg" class="auth-msg"></div>
