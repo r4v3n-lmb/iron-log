@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.22";
+  const APP_VERSION = "v1.0.23";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -2656,7 +2656,8 @@
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
-    const list=Object.keys(PROFILES).map(k=>{ const p=PROFILES[k],a=k===activeProfile; return `<button class="prof-btn ${a?'pa':''}" style="${a?'border-color:'+p.color+';color:'+p.color:''}" onclick="switchProfile('${k}')">${p.label}</button>`; }).join('');
+    const profileKeys=isAdminUser() ? Object.keys(PROFILES) : [activeProfile];
+    const list=profileKeys.map(k=>{ const p=PROFILES[k],a=k===activeProfile; return `<button class="prof-btn ${a?'pa':''}" style="${a?'border-color:'+p.color+';color:'+p.color:''}" onclick="${isAdminUser()?`switchProfile('${k}')`:'void(0)'}">${p.label}</button>`; }).join('');
     el.innerHTML=`${list}<button class="prof-btn" onclick="signOutAccount()">SIGN OUT</button>`;
   }
   window.setManagementTab=function(tab){
