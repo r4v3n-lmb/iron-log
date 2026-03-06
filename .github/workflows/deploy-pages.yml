@@ -31,6 +31,7 @@ jobs:
           mkdir -p site
           cp ironlog.html site/ironlog.html
           cp ironlog.html site/index.html
+          if [ -f iron_log_logo.png ]; then cp iron_log_logo.png site/iron_log_logo.png; fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
