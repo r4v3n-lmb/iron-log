@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.26";
+  const APP_VERSION = "v1.0.27";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -3189,7 +3189,7 @@ button,input,select,textarea{font:inherit}
 .hdr{display:flex;justify-content:space-between;align-items:center;padding:11px 20px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;gap:12px}
 .logo{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.65rem;letter-spacing:.18em;flex-shrink:0}
 .logo-brand{display:flex;align-items:center;gap:8px}
-.logo-img{width:28px;height:28px;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+.logo-img{width:42px;height:42px;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
 .logo-log{color:var(--accent);transition:color .3s}
 .hdr-center{flex:1;display:flex;justify-content:center}
 #header-datetime{font-family:'Barlow Condensed',sans-serif;font-size:.7rem;letter-spacing:.12em;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:1px}
@@ -3659,7 +3659,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
 @media(max-width:440px){
   .logo{font-size:1.25rem}
-  .logo-img{width:24px;height:24px}
+  .logo-img{width:34px;height:34px}
   #day-grid{grid-template-columns:1fr 1fr}
   .adm-filters{grid-template-columns:1fr}
 }
