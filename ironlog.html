@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.27";
+  const APP_VERSION = "v1.0.28";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -75,6 +75,9 @@
   let adminFilterUser = "all";
   let adminDateFrom = "";
   let adminDateTo = "";
+  let adminTablesCache = null;
+  let notificationsOpen = false;
+  let notificationsSeen = {};
   let settingsSectionState = {
     user: false,
     data: false,
@@ -205,6 +208,7 @@
     if(!PROFILES[pk]) return;
     activeProfile=pk;
     localStorage.setItem("ironlog_profile",pk);
+    try{ notificationsSeen=JSON.parse(localStorage.getItem(`ironlog_notif_seen_${activeProfile}`)||"{}")||{}; }catch(_e){ notificationsSeen={}; }
     document.body.classList.remove("auth-locked");
     const gate=document.getElementById("auth-gate");
     if(gate) gate.style.display="none";
@@ -556,6 +560,10 @@
       return;
     }
     activeProfile=pk; localStorage.setItem("ironlog_profile",pk);
+    notificationsOpen=false;
+    const np=document.getElementById("notif-panel");
+    if(np) np.style.display="none";
+    try{ notificationsSeen=JSON.parse(localStorage.getItem(`ironlog_notif_seen_${activeProfile}`)||"{}")||{}; }catch(_e){ notificationsSeen={}; }
     // Don't wipe workouts/plan — those are shared. Just reload personal data.
     [freqChart,volChart,bwChart,tonnageChart,sleepChart].forEach(c=>{ if(c)c.destroy(); });
     freqChart=volChart=bwChart=tonnageChart=sleepChart=null;
@@ -1057,7 +1065,7 @@
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions();
+    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions(); renderNotifications();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -2683,6 +2691,9 @@
     if(adminBtn) adminBtn.style.display=isAdminUser()?"block":"none";
   }
   window.openSettings=function(){
+    notificationsOpen=false;
+    const np=document.getElementById("notif-panel");
+    if(np) np.style.display="none";
     settingsSectionState = {
       user:false,data:false,management:false,admin:false,debug:false,templates:false,theme:false,version:false
     };
@@ -2874,6 +2885,84 @@
       <div class="adm-table-wrap"><table class="adm-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
     </section>`;
   }
+  function toCsv(columns, rows){
+    const esc=(v)=>`"${String(v??"").replace(/"/g,'""')}"`;
+    const header=columns.map(esc).join(",");
+    const lines=rows.map(r=>columns.map(c=>esc(r[c])).join(","));
+    return [header,...lines].join("\n");
+  }
+  function downloadText(filename, content, type){
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(new Blob([content],{type:type||"text/plain"}));
+    a.download=filename;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+  window.exportAdminDataPack=function(){
+    if(!isAdminUser()) return;
+    if(!adminTablesCache){
+      toast("Refresh admin tables first");
+      return;
+    }
+    const ts=new Date().toISOString().replace(/[:.]/g,"-");
+    const pack={
+      exportedAt:new Date().toISOString(),
+      version:APP_VERSION,
+      filters:{query:adminFilterQuery,user:adminFilterUser,dateFrom:adminDateFrom,dateTo:adminDateTo},
+      tables:adminTablesCache
+    };
+    downloadText(`ironlog_data_pack_${ts}.json`,JSON.stringify(pack,null,2),"application/json");
+    downloadText(`ironlog_users_${ts}.csv`,toCsv(["key","name","pin","height_cm","water_l","protein_g","color","created_at"],adminTablesCache.users||[]),"text/csv");
+    downloadText(`ironlog_workouts_${ts}.csv`,toCsv(["user","date","day_key","done","exercise_entries","note"],adminTablesCache.workouts||[]),"text/csv");
+    downloadText(`ironlog_exercises_${ts}.csv`,toCsv(["user","exercise","source","sets","reps","muscle_group"],adminTablesCache.exercises||[]),"text/csv");
+    downloadText(`ironlog_collected_${ts}.csv`,toCsv(["user","date","type","value","water_l","protein_g","sleep_h","soreness"],adminTablesCache.collected||[]),"text/csv");
+    toast("Data pack exported");
+  };
+  function getNotifications(){
+    const list=[];
+    const today=getTodayStr();
+    if(hasAppUpdate()){
+      list.push({id:`update_${latestAppVersion}`,type:"update",title:`Update ${latestAppVersion} available`,detail:"Open quick action CHECK UPDATE or Settings > Version."});
+    }
+    const todayKey=getTodayDayKey();
+    if(todayKey){
+      const done=!!state.workouts?.[today]?.[todayKey]?.done;
+      if(!done) list.push({id:`today_plan_${today}`,type:"reminder",title:"Today's workout is still open",detail:"Tap START TODAY from quick actions."});
+    }
+    const recentPr=Object.keys(state.prs||{}).some(k=>{
+      const pr=state.prs[k];
+      const participant=pr?.participant || (String(k).includes("_") ? String(k).split("_")[0] : activeProfile);
+      if(participant!==activeProfile) return false;
+      if(!pr.date) return false;
+      return (new Date(today)-new Date(pr.date)) <= (14*24*60*60*1000);
+    });
+    if(!recentPr){
+      list.push({id:`pr_nudge_${today.slice(0,7)}`,type:"nudge",title:"No PR in the last 14 days",detail:"Try a progression set on your main lift this week."});
+    }
+    return list;
+  }
+  function renderNotifications(){
+    const box=document.getElementById("notif-list");
+    const badge=document.getElementById("notif-badge");
+    if(!box||!badge) return;
+    const items=getNotifications();
+    const unseen=items.filter(n=>!notificationsSeen[n.id]).length;
+    badge.style.display=unseen>0?"inline-flex":"none";
+    badge.textContent=String(unseen);
+    box.innerHTML=items.length?items.map(n=>`<div class="noti-item"><div class="noti-title">${escHtml(n.title)}</div><div class="noti-detail">${escHtml(n.detail)}</div></div>`).join(""):`<div class="noti-empty">No notifications</div>`;
+  }
+  window.toggleNotifications=function(){
+    notificationsOpen=!notificationsOpen;
+    const p=document.getElementById("notif-panel");
+    if(!p) return;
+    p.style.display=notificationsOpen?"block":"none";
+    if(notificationsOpen){
+      const items=getNotifications();
+      items.forEach(n=>{ notificationsSeen[n.id]=true; });
+      try{ localStorage.setItem(`ironlog_notif_seen_${activeProfile}`,JSON.stringify(notificationsSeen)); }catch(_e){}
+    }
+    renderNotifications();
+  };
   function applyAdminFilters(rows){
     const q=String(adminFilterQuery||"").trim().toLowerCase();
     return rows.filter(r=>{
@@ -3044,6 +3133,12 @@
       const filteredCollected=applyAdminFilters(collectedRows);
       const allUsers=Array.from(new Set([...Object.keys(accounts),...Object.keys(profileData)])).sort();
       const userOptions=['<option value="all">ALL USERS</option>',...allUsers.map(u=>`<option value="${u}" ${adminFilterUser===u?'selected':''}>${u.toUpperCase()}</option>`)].join("");
+      adminTablesCache = {
+        users:userRows,
+        workouts:workoutRows,
+        exercises:exerciseRows,
+        collected:collectedRows
+      };
 
       root.innerHTML = `
         <section class="adm-card">
@@ -3166,6 +3261,16 @@
     }catch(_e){}
     document.getElementById("cii").addEventListener("change",handleCsvImport);
     document.getElementById("sto").addEventListener("click",closeSettings);
+    document.addEventListener("click",(e)=>{
+      const panel=document.getElementById("notif-panel");
+      const btn=e.target?.closest?.(".notif-btn");
+      if(btn) return;
+      if(panel && notificationsOpen && !panel.contains(e.target)){
+        notificationsOpen=false;
+        panel.style.display="none";
+      }
+    });
+    try{ notificationsSeen=JSON.parse(localStorage.getItem(`ironlog_notif_seen_${activeProfile}`)||"{}")||{}; }catch(_e){ notificationsSeen={}; }
     renderAppVersion();
     updateLogoColor(); updateClock(); setInterval(updateClock,1000);
     initSwipeGestures(); // Initialize swipe gestures for mobile
@@ -3197,6 +3302,14 @@ button,input,select,textarea{font:inherit}
 .hdr-right{display:flex;align-items:center;gap:8px}
 .hdr-icn-btn{width:36px;height:32px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;transition:background .1s}
 .hdr-icn-btn:hover{background:var(--bg4)}
+.notif-btn{position:relative}
+#notif-badge{position:absolute;top:-6px;right:-6px;min-width:16px;height:16px;border-radius:999px;background:#f43f5e;color:#fff;font-size:.62rem;display:none;align-items:center;justify-content:center;border:1px solid rgba(0,0,0,.35);padding:0 4px}
+#notif-panel{display:none;position:fixed;top:52px;right:14px;width:min(92vw,340px);max-height:60vh;overflow:auto;background:var(--bg2);border:1px solid var(--border);box-shadow:var(--shadow);z-index:250;border-radius:var(--radius)}
+.noti-head{position:sticky;top:0;background:var(--bg3);padding:9px 11px;border-bottom:1px solid var(--border);font-family:'Barlow Condensed',sans-serif;letter-spacing:.12em;font-size:.76rem;color:var(--muted)}
+.noti-item{padding:10px 11px;border-bottom:1px solid rgba(255,255,255,.06)}
+.noti-title{font-family:'Barlow Condensed',sans-serif;letter-spacing:.07em;font-size:.84rem}
+.noti-detail{margin-top:2px;color:var(--muted);font-size:.78rem;line-height:1.35}
+.noti-empty{padding:12px;color:var(--muted);font-size:.8rem;text-align:center}
 
 /* AUTH GATE */
 body.auth-locked .hdr,
@@ -3719,6 +3832,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <div class="adm-title-main"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON <span class="logo-log">LOG</span></span> · ADMIN DATA</div>
     <div class="adm-actions">
       <button class="st-ab" style="width:auto;margin:0" onclick="refreshAdminDataTables()">REFRESH</button>
+      <button class="st-ab" style="width:auto;margin:0" onclick="exportAdminDataPack()">EXPORT PACK</button>
       <button class="st-ab" style="width:auto;margin:0" onclick="closeAdminDataPage()">CLOSE</button>
     </div>
   </div>
@@ -3730,8 +3844,13 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   <div class="logo"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON<span class="logo-log">LOG</span></span></div>
   <div class="hdr-center"><div id="header-datetime"></div></div>
   <div class="hdr-right">
+    <button class="hdr-icn-btn notif-btn" onclick="toggleNotifications()" title="Notifications">🔔<span id="notif-badge">0</span></button>
     <button class="hdr-icn-btn" onclick="openSettings()" title="Settings">☰</button>
   </div>
+</div>
+<div id="notif-panel">
+  <div class="noti-head">NOTIFICATIONS</div>
+  <div id="notif-list"></div>
 </div>
 
 <!-- STATS -->
