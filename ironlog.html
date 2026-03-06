@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.10";
+  const APP_VERSION = "v1.0.11";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -2780,16 +2780,22 @@ body.auth-locked .hdr,
 body.auth-locked .sbar,
 body.auth-locked .main{display:none}
 #auth-gate{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:20px;background:radial-gradient(circle at top right,rgba(232,93,4,.18),transparent 55%),var(--bg)}
-.auth-card{width:100%;max-width:760px;background:var(--bg2);border:1px solid var(--border);box-shadow:var(--shadow);padding:18px}
+.auth-card{width:100%;max-width:760px;background:linear-gradient(160deg,var(--bg2),var(--bg3));border:1px solid var(--border);box-shadow:var(--shadow);padding:22px;position:relative;overflow:hidden}
+.auth-card::before{content:"";position:absolute;top:-40px;right:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(232,93,4,.2),transparent 70%);pointer-events:none}
 .auth-title{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.18em;font-size:1.35rem}
+.auth-title .auth-log{color:var(--accent)}
 .auth-sub{margin-top:4px;color:var(--muted);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.82rem}
 .auth-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
 .auth-pane{border:1px solid var(--border);background:var(--bg3);padding:12px}
 .auth-h{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.13em;font-size:.86rem;color:var(--muted);margin-bottom:8px}
 .auth-msg{margin-top:10px;min-height:18px;color:#ff9b9b;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.78rem}
 .auth-pane .fi,.auth-pane .fsel{margin-bottom:7px}
-.auth-home{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:220px}
+.auth-home{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:240px;text-align:center}
 .auth-actions{display:flex;gap:10px}
+.auth-actions .st-ab{min-width:170px;padding:11px 14px;font-size:.85rem;background:var(--bg4)}
+.auth-actions .st-ab:first-child{border-color:rgba(232,93,4,.45);color:#f4c7a8}
+.auth-actions .st-ab:last-child{border-color:rgba(92,186,92,.4);color:#b7f3b7}
+.auth-actions .st-ab:hover{filter:brightness(1.08)}
 .auth-back{margin-top:6px}
 @media(max-width:760px){
   .auth-grid{grid-template-columns:1fr}
@@ -3195,7 +3201,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 <div id="auth-gate">
   <div class="auth-card">
     <div id="auth-home" class="auth-home">
-      <div class="auth-title">IRON LOG</div>
+      <div class="auth-title">IRON <span class="auth-log">LOG</span></div>
       <div class="auth-sub">Choose an option to continue.</div>
       <div class="auth-actions">
         <button class="st-ab" onclick="showAuthMode('signin')">SIGN IN</button>
