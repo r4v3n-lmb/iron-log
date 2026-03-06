@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.24";
+  const APP_VERSION = "v1.0.25";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -3154,6 +3154,17 @@ body.auth-locked .main{display:none}
 .color-dot{width:20px;height:20px;border-radius:50%;border:1px solid var(--border);background:var(--dot);cursor:pointer;outline:none}
 .color-dot.active{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.25);transform:scale(1.08)}
 .auth-card,.auth-pane{border-radius:var(--radius)}
+html.light-mode #auth-gate{background:radial-gradient(circle at top right,rgba(232,93,4,.15),transparent 55%),#e9e7e2}
+html.light-mode .auth-card{background:linear-gradient(165deg,#f8f7f3,#ece9e3);border-color:#bcb7ae}
+html.light-mode .auth-pane{background:#f2f0eb;border-color:#c5c0b7}
+html.light-mode .auth-sub,
+html.light-mode .auth-h,
+html.light-mode .auth-ver,
+html.light-mode .auth-field-label{color:#57524a}
+html.light-mode .auth-actions .st-ab{background:#f3f0ea;color:#2a2622;border-color:#bbb4aa}
+html.light-mode .auth-actions .st-ab:first-child{color:#8d3f16;border-color:rgba(141,63,22,.38)}
+html.light-mode .auth-actions .st-ab:last-child{color:#2f6a2f;border-color:rgba(47,106,47,.4)}
+html.light-mode .auth-msg{color:#b42318}
 @media(max-width:760px){
   .auth-grid{grid-template-columns:1fr}
   .auth-actions{flex-direction:column;width:100%}
