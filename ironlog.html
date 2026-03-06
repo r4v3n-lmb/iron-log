@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, getDoc, onSnapshot, deleteField } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDwkvvVwJbk3JC_ddej74sFOxgPBl2ccE8",
@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.14";
+  const APP_VERSION = "v1.0.15";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -42,6 +42,7 @@
   const PREMADE = new Set(["revan","bronwen"]);
   // seedPlan is ONLY used as a fallback if Firebase returns nothing
   function seedPlan(pk){ return PREMADE.has(pk)?deepCopy(DEFAULT_PLAN):{}; }
+  function canUseLegacySharedFallback(pk){ return PREMADE.has(pk); }
 
   const MAX_DAYS = 10;
   let WORKOUT_PLAN = {};
@@ -2659,7 +2660,10 @@
           <input id="mgu-${pk}-water" class="fi" type="number" step="0.1" min="1" max="8" placeholder="Water target L" value="${p.water||''}">
           <input id="mgu-${pk}-protein" class="fi" type="number" min="20" max="400" placeholder="Protein target g" value="${p.protein||''}">
         </div>
-        <button class="st-ab" onclick="saveUserOverridesFromEditor('${pk}')" style="margin-top:7px">SAVE ${p.label}</button>
+        <div style="display:flex;gap:6px;margin-top:7px">
+          <button class="st-ab" onclick="saveUserOverridesFromEditor('${pk}')" style="margin:0">SAVE ${p.label}</button>
+          ${pk!=="revan" ? `<button class="st-ab" onclick="deleteUserAccount('${pk}')" style="margin:0;color:#ff9b9b;border-color:rgba(255,120,120,.35)">DELETE</button>` : ``}
+        </div>
       </div>`;
     }).join('');
     Object.keys(PROFILES).forEach(pk=>{
@@ -2715,6 +2719,33 @@
     renderManagement();
     await saveData();
     toast(`✓ ${PROFILES[pk].label} updated`);
+  };
+  window.deleteUserAccount=async function(pk){
+    if(!canManageWorkoutParticipants()){
+      toast("Only Revan can delete users");
+      return;
+    }
+    if(!accountRegistry[pk]){
+      toast("⚠️ User not found");
+      return;
+    }
+    if(pk===activeProfile){
+      toast("⚠️ Switch profile before deleting this user");
+      return;
+    }
+    const name=accountRegistry[pk]?.name||pk;
+    const ok=confirm(`Delete user ${name}? This removes account access and that user's profile data.`);
+    if(!ok) return;
+    delete accountRegistry[pk];
+    await persistAccounts();
+    await setDoc(doc(db,"ironlog",SHARED_DOC),{
+      profileData: { [pk]: deleteField() },
+      [`profileData.${pk}`]: deleteField()
+    },{merge:true});
+    buildProfilesFromAccounts();
+    renderSettingsProfiles();
+    renderManagement();
+    toast(`🗑 Deleted ${name}`);
   };
   window.setTheme=function(t){ if(t==="light")document.documentElement.classList.add("light-mode"); else document.documentElement.classList.remove("light-mode"); localStorage.setItem("ironlog_theme",t); };
 
