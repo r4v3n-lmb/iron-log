@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.12";
+  const APP_VERSION = "v1.0.13";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -2813,7 +2813,8 @@ body.auth-locked .main{display:none}
 .auth-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
 .auth-pane{border:1px solid var(--border);background:var(--bg3);padding:12px}
 .auth-h{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.13em;font-size:.86rem;color:var(--muted);margin-bottom:8px}
-.auth-msg{margin-top:10px;min-height:18px;color:#ff9b9b;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.78rem}
+.auth-msg{margin-top:8px;color:#ff9b9b;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.78rem}
+.auth-msg:empty{display:none}
 .auth-pane .fi,.auth-pane .fsel{margin-bottom:7px}
 .auth-home{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:240px;text-align:center}
 .auth-actions{display:flex;gap:10px}
