@@ -71,9 +71,11 @@
   let latestAppUpdatedAt = "";
   let lastUpdateToastVersion = "";
   let managementTab = "exercises";
+  function canManageWorkoutParticipants(){ return activeProfile==="revan"; }
 
   // ─── SESSION PARTICIPANTS ───
   function getTrackableParticipants(key){
+    if(!canManageWorkoutParticipants()) return [activeProfile];
     const planParts = WORKOUT_PLAN[key]?.participants || [activeProfile];
     const set = new Set([activeProfile, ...planParts]);
     // Quick partner toggle for the main shared pair
@@ -82,6 +84,7 @@
     return Array.from(set).filter(p => !!PROFILES[p]);
   }
   function getSessionParticipants(date, key){
+    if(!canManageWorkoutParticipants()) return [activeProfile];
     const wo = state.workouts?.[date]?.[key];
     const trackable = getTrackableParticipants(key);
     if(wo?.sessionParticipants?.length){
@@ -91,6 +94,10 @@
     return [activeProfile];
   }
   window.toggleSessionParticipant = async function(key, participant){
+    if(!canManageWorkoutParticipants()){
+      toast("Only Revan can manage session participants");
+      return;
+    }
     const wo = getWorkout(activeDate, key);
     const trackable = getTrackableParticipants(key);
     if(!trackable.includes(participant)) return;
@@ -1959,7 +1966,11 @@
       h+=`<div class="eer" data-index="${i}"><span class="eed">⠿</span><input class="een" list="exercise-options" value="${ex.name}" placeholder="Exercise name"><input class="ees" type="number" value="${ex.sets||''}" placeholder="Sets" min="0" max="10" style="width:52px"><span style="color:#555;font-size:.8rem">×</span><input class="eer2" value="${ex.reps}" placeholder="Reps" style="width:56px"><button class="emv" onclick="moveExercise(${i},-1)" title="Move up">▲</button><button class="emv" onclick="moveExercise(${i},1)" title="Move down">▼</button><button class="edb" onclick="this.closest('.eer').remove()">🗑</button></div>`;
     });
     h+=`</div><button class="eab" onclick="addEditRow()" style="border-color:${day.color};color:${day.color}">+ ADD EXERCISE</button>`;
-    h+=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:8px">PARTICIPANTS</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="edit-participants-bronwen" ${day.participants?.includes('bronwen')?'checked':''} style="cursor:pointer"><span>Bronwen also does this workout (shows split tracking)</span></label></div>`;
+    if(canManageWorkoutParticipants()){
+      h+=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:8px">PARTICIPANTS</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="edit-participants-bronwen" ${day.participants?.includes('bronwen')?'checked':''} style="cursor:pointer"><span>Bronwen also does this workout (shows split tracking)</span></label></div>`;
+    } else {
+      h+=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:8px">PARTICIPANTS</label><div style="color:var(--muted);font-size:.82rem">Only Revan can change workout participants.</div></div>`;
+    }
     h+=`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">WORKOUT NOTES (OPTIONAL)</label><textarea id="edit-notes-input" placeholder="Add notes about this workout..." style="width:100%;height:80px;padding:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:inherit;resize:vertical">${day.notes||''}</textarea></div>`;
     document.getElementById("emb").innerHTML=h;
     document.getElementById("em").style.display="flex";
@@ -1988,12 +1999,14 @@
     const newTitle=document.getElementById("edit-title-input").value.trim();
     const newSubtitle=document.getElementById("edit-subtitle-input").value.trim();
     const newNotes=document.getElementById("edit-notes-input").value.trim();
-    const hasBronwen=document.getElementById("edit-participants-bronwen").checked;
+    const hasBronwen=canManageWorkoutParticipants() ? !!document.getElementById("edit-participants-bronwen")?.checked : (WORKOUT_PLAN[key].participants||[]).includes("bronwen");
     if(!newTitle){toast("⚠️ Enter a title");return;}
     WORKOUT_PLAN[key].title=newTitle;
     WORKOUT_PLAN[key].subtitle=newSubtitle;
     WORKOUT_PLAN[key].notes=newNotes||"";
-    WORKOUT_PLAN[key].participants=hasBronwen?['revan','bronwen']:['revan'];
+    if(canManageWorkoutParticipants()){
+      WORKOUT_PLAN[key].participants=hasBronwen?['revan','bronwen']:['revan'];
+    }
     const rows=document.querySelectorAll("#eel .eer"), newEx=[];
     rows.forEach(r=>{ const n=r.querySelector(".een").value.trim(); const s=parseInt(r.querySelector(".ees").value)||0; const rp=r.querySelector(".eer2").value.trim()||"12"; if(n)newEx.push({name:n,sets:s,reps:rp}); });
     WORKOUT_PLAN[key].exercises=newEx; closeEdit();
