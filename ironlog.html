@@ -432,11 +432,17 @@
   }
   function stripParticipantPrefix(exName){
     if(typeof exName!=="string") return exName;
-    for(const pk of Object.keys(PROFILES||{})){
-      const prefix=`${pk}_`;
-      if(exName.startsWith(prefix)) return exName.slice(prefix.length);
+    let out=exName.trim();
+    const profileKeys=new Set(Object.keys(PROFILES||{}).map(k=>k.toLowerCase()));
+    // Remove one or more leading participant prefixes, case-insensitive.
+    while(true){
+      const idx=out.indexOf("_");
+      if(idx<=0) break;
+      const maybeProfile=out.slice(0,idx).toLowerCase();
+      if(!profileKeys.has(maybeProfile)) break;
+      out=out.slice(idx+1);
     }
-    return exName;
+    return out;
   }
   function getPRRecord(participant, exName){
     const cleanExName=stripParticipantPrefix(exName);
@@ -893,11 +899,25 @@
     const lm=new Date(lf); lm.setDate(lf.getDate()-4);
     const fmt=d=>d.toISOString().split("T")[0];
     const monStr=fmt(lm),friStr=fmt(lf);
-    let dc=0,tv=0,prs=[],wt=[];
+    let dc=0,tv=0,wt=[];
+    const prsSet=new Set();
     for(let d=new Date(lm);d<=lf;d.setDate(d.getDate()+1)){
       const ds=fmt(d),wd=state.workouts?.[ds]; if(!wd)continue;
-      Object.keys(wd).forEach(k=>{ const s=wd[k]; if(!s.done)return; dc++;wt.push(k);tv+=calcSessionTonnage(ds,k); Object.keys(state.prs||{}).forEach(e=>{if(state.prs[e].date===ds)prs.push(e);}); });
+      Object.keys(wd).forEach(k=>{
+        const s=wd[k];
+        if(!s.done) return;
+        dc++; wt.push(k); tv+=calcSessionTonnage(ds,k);
+      });
+      Object.keys(state.prs||{}).forEach(prKey=>{
+        const pr=state.prs[prKey];
+        if(!pr||pr.date!==ds) return;
+        const participant=String(pr.participant || (String(prKey).includes("_") ? String(prKey).split("_")[0] : activeProfile)).toLowerCase();
+        if(participant!==activeProfile) return;
+        const clean=stripParticipantPrefix(stripParticipantPrefix(String(prKey||""))).trim();
+        if(clean) prsSet.add(clean);
+      });
     }
+    const prs=Array.from(prsSet);
     if(dc===0){el.style.display="none";return;}
     el.style.display="block";
     const dots=wt.map(k=>`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${WORKOUT_PLAN[k]?.color||'#888'};margin-right:3px"></span>${WORKOUT_PLAN[k]?.title||k}`).join(' ');
@@ -1742,7 +1762,7 @@
       const w=parseFloat(wo.exercises[exName].weight||0);
       // Extract participant — new keys are "profile_ExName", old keys are just "ExName"
       const part=exName.includes('_')?exName.split('_')[0]:activeProfile;
-      const displayName=exName.includes('_')?exName.replace(/^[^_]+_/,''):exName;
+      const displayName=stripParticipantPrefix(stripParticipantPrefix(exName));
       if(w>0&&checkPR(exName,w,key,activeDate,part))toast(`🏆 NEW PR — ${displayName} @ ${w}kg!`);
     }
     const sy=window.scrollY; renderDayPanel(key); renderStats(); renderCharts(); renderCalendar(); window.scrollTo(0,sy);
@@ -1753,7 +1773,7 @@
     if(!wo.exercises[exName])wo.exercises[exName]={};
     wo.exercises[exName].weight=val;
     const w=parseFloat(val);
-    const displayName=exName.includes('_')?exName.replace(/^[^_]+_/,''):exName;
+    const displayName=stripParticipantPrefix(stripParticipantPrefix(exName));
     if(wo.exercises[exName].checked&&w>0&&checkPR(exName,w,key,activeDate,participant||activeProfile))toast(`🏆 NEW PR — ${displayName} @ ${w}kg!`);
     renderStats(); renderCharts(); await saveData();
   };
@@ -3036,7 +3056,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 
   <div class="nav-sec">
     <button class="nav-btn" onclick="navigateToGym()">🗺 NAVIGATE TO GYM</button>
-    <button class="nav-rst" onclick="resetGymUrl()">RESET URL</button>
+    <button class="nav-rst" onclick="resetGymUrl()">CLEAR SAVED GYM URL</button>
   </div>
 </div>
 
