@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.23";
+  const APP_VERSION = "v1.0.24";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -85,6 +85,7 @@
   const THEME_COLORS = ["#f72585","#4361ee","#2ec4b6","#7b2d8b","#f0c040","#5cba5c","#ef4444","#14b8a6","#3b82f6"];
   function canManageWorkoutParticipants(){ return activeProfile==="revan"; }
   function isAdminUser(){ return activeProfile==="revan"; }
+  const FIRESTORE_SPARK_LIMIT_BYTES = 1024 * 1024 * 1024;
 
   const ACCOUNTS_DOC = "accounts";
   function toProfileKey(name){
@@ -2814,12 +2815,26 @@
   function escHtml(v){
     return String(v ?? "").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m]));
   }
-  function buildTable(title, columns, rows){
+  function bytesForObject(obj){
+    try{
+      return new TextEncoder().encode(JSON.stringify(obj ?? {})).length;
+    }catch(_e){
+      return 0;
+    }
+  }
+  function formatBytes(bytes){
+    const b=Math.max(0,Number(bytes)||0);
+    if(b<1024) return `${b} B`;
+    if(b<1024*1024) return `${(b/1024).toFixed(1)} KB`;
+    if(b<1024*1024*1024) return `${(b/(1024*1024)).toFixed(2)} MB`;
+    return `${(b/(1024*1024*1024)).toFixed(2)} GB`;
+  }
+  function buildTable(title, columns, rows, sizeBytes){
     const head = columns.map(c=>`<th>${escHtml(c)}</th>`).join("");
     const body = rows.length ? rows.map(r=>`<tr>${columns.map(c=>`<td>${escHtml(r[c]??"")}</td>`).join("")}</tr>`).join("")
       : `<tr><td colspan="${columns.length}" style="text-align:center;color:var(--muted)">No records</td></tr>`;
     return `<section class="adm-card">
-      <div class="adm-title">${escHtml(title)} <span class="adm-count">${rows.length}</span></div>
+      <div class="adm-title">${escHtml(title)} <span class="adm-count">${rows.length} · ${formatBytes(sizeBytes)}</span></div>
       <div class="adm-table-wrap"><table class="adm-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
     </section>`;
   }
@@ -2959,12 +2974,30 @@
         });
       });
 
-      root.innerHTML = [
-        buildTable("Users",["key","name","pin","height_cm","water_l","protein_g","color","created_at"],userRows),
-        buildTable("Workouts",["user","date","day_key","done","exercise_entries","note"],workoutRows),
-        buildTable("Exercises",["user","exercise","source","sets","reps","muscle_group"],exerciseRows),
-        buildTable("Collected Data",["user","date","type","value","water_l","protein_g","sleep_h","soreness"],collectedRows)
-      ].join("");
+      const usersBytes=bytesForObject(userRows);
+      const workoutsBytes=bytesForObject(workoutRows);
+      const exercisesBytes=bytesForObject(exerciseRows);
+      const collectedBytes=bytesForObject(collectedRows);
+      const totalMeasured=usersBytes+workoutsBytes+exercisesBytes+collectedBytes;
+      const estimatedFree=Math.max(0,FIRESTORE_SPARK_LIMIT_BYTES-totalMeasured);
+      const usagePct=((totalMeasured/FIRESTORE_SPARK_LIMIT_BYTES)*100).toFixed(2);
+
+      root.innerHTML = `
+        <section class="adm-card">
+          <div class="adm-title">DATABASE USAGE (ESTIMATED)</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
+            <div class="version-row">USED <strong style="float:right">${formatBytes(totalMeasured)}</strong></div>
+            <div class="version-row">FREE <strong style="float:right">${formatBytes(estimatedFree)}</strong></div>
+            <div class="version-row">LIMIT <strong style="float:right">${formatBytes(FIRESTORE_SPARK_LIMIT_BYTES)}</strong></div>
+            <div class="version-row">USAGE <strong style="float:right">${usagePct}%</strong></div>
+          </div>
+          <div style="margin-top:8px;color:var(--muted);font-size:.72rem;letter-spacing:.06em">Estimate based on loaded table payloads, not exact Firestore storage billing/index size.</div>
+        </section>
+        ${buildTable("Users",["key","name","pin","height_cm","water_l","protein_g","color","created_at"],userRows,usersBytes)}
+        ${buildTable("Workouts",["user","date","day_key","done","exercise_entries","note"],workoutRows,workoutsBytes)}
+        ${buildTable("Exercises",["user","exercise","source","sets","reps","muscle_group"],exerciseRows,exercisesBytes)}
+        ${buildTable("Collected Data",["user","date","type","value","water_l","protein_g","sleep_h","soreness"],collectedRows,collectedBytes)}
+      `;
     }catch(e){
       root.innerHTML=`<div style="color:#ff9b9b;padding:12px">Failed to load admin data.</div>`;
     }
