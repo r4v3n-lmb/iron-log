@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.20";
+  const APP_VERSION = "v1.0.21";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -71,6 +71,16 @@
   let latestAppUpdatedAt = "";
   let lastUpdateToastVersion = "";
   let managementTab = "exercises";
+  let settingsSectionState = {
+    user: true,
+    data: false,
+    management: true,
+    admin: false,
+    debug: false,
+    templates: false,
+    theme: false,
+    version: true
+  };
   let authInitialized = false;
   const THEME_COLORS = ["#f72585","#4361ee","#2ec4b6","#7b2d8b","#f0c040","#5cba5c","#ef4444","#14b8a6","#3b82f6"];
   function canManageWorkoutParticipants(){ return activeProfile==="revan"; }
@@ -2616,11 +2626,26 @@
   };
 
   // ─── SETTINGS ─────
+  function renderSettingsSectionUI(){
+    Object.keys(settingsSectionState).forEach(sec=>{
+      const panel=document.querySelector(`.sts[data-sec="${sec}"]`);
+      const arrow=document.getElementById(`st-arrow-${sec}`);
+      if(!panel) return;
+      const open=!!settingsSectionState[sec];
+      panel.classList.toggle("collapsed", !open);
+      if(arrow) arrow.textContent=open?"▾":"▸";
+    });
+  }
+  window.toggleSettingsSection=function(sec){
+    settingsSectionState[sec]=!settingsSectionState[sec];
+    try{ localStorage.setItem("ironlog_settings_sections", JSON.stringify(settingsSectionState)); }catch(_e){}
+    renderSettingsSectionUI();
+  };
   function renderAdminSettingsBlock(){
     const el=document.getElementById("admin-settings-block");
     if(el) el.style.display=isAdminUser() ? "block" : "none";
   }
-  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); };
+  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderSettingsSectionUI(); };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
@@ -3019,6 +3044,13 @@
   window.addEventListener("DOMContentLoaded",()=>{
     const th=localStorage.getItem("ironlog_theme");
     if(th==="light")document.documentElement.classList.add("light-mode");
+    try{
+      const raw=localStorage.getItem("ironlog_settings_sections");
+      if(raw){
+        const parsed=JSON.parse(raw);
+        if(parsed&&typeof parsed==="object") settingsSectionState={...settingsSectionState,...parsed};
+      }
+    }catch(_e){}
     document.getElementById("cii").addEventListener("change",handleCsvImport);
     document.getElementById("sto").addEventListener("click",closeSettings);
     renderAppVersion();
@@ -3378,6 +3410,11 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .stcb:hover{color:var(--text)}
 .sts{padding:12px 15px;border-bottom:1px solid var(--border)}
 .stst{font-family:'Barlow Condensed',sans-serif;font-size:.74rem;letter-spacing:.11em;color:var(--muted);margin-bottom:9px;line-height:1.2}
+.stst-toggle{display:flex;justify-content:space-between;align-items:center;cursor:pointer;margin-bottom:0;padding:2px 0}
+.stst-toggle:hover{color:var(--text)}
+.st-arrow{font-size:.86rem;line-height:1}
+.sts .st-body{margin-top:9px}
+.sts.collapsed .st-body{display:none}
 #stprofs{display:flex;gap:5px;flex-wrap:wrap}
 .prof-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 9px;font-family:'Barlow Condensed',sans-serif;font-size:.75rem;letter-spacing:.12em;cursor:pointer;transition:background .1s}
 .prof-btn:hover{background:var(--bg3)}
@@ -3631,57 +3668,73 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <span class="sttl">⚙ SETTINGS</span>
     <button class="stcb" onclick="closeSettings()">×</button>
   </div>
-  <div class="sts">
-    <div class="stst">// USER</div>
-    <div id="stprofs"></div>
-  </div>
-  <div class="sts">
-    <div class="stst">// DATA</div>
-    <button class="st-ab" onclick="pushUpdatesNow()" style="color:#60a5fa;border-color:rgba(96,165,250,.35)">☁ PUSH UPDATES NOW</button>
-    <button class="st-ab" onclick="cleanupDuplicatePRs()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">🧹 CLEAN DUPLICATE PRS</button>
-    <button class="st-ab" onclick="exportCSV()">📥 EXPORT CSV</button>
-    <label class="st-ab" style="cursor:pointer">📤 IMPORT CSV<input type="file" id="cii" accept=".csv" style="display:none"></label>
-  </div>
-  <div class="sts">
-    <div class="stst">// MANAGEMENT</div>
-    <div id="mg-tabs" class="th-btns"></div>
-    <div id="mg-body" style="margin-top:8px"></div>
-  </div>
-  <div class="sts" id="admin-settings-block" style="display:none">
-    <div class="stst">// ADMIN</div>
-    <button class="st-ab" onclick="openAdminDataPage()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">📊 OPEN ADMIN DATA TABLES</button>
-  </div>
-  <div class="sts">
-    <div class="stst">// DEBUG</div>
-    <button class="st-ab" onclick="debugFirebase()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">🔍 CHECK FIREBASE DOCS</button>
-    <button class="st-ab" onclick="forceMigrate()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⚡ FORCE RE-MIGRATE DATA</button>
-    <div style="font-size:.7rem;color:var(--muted);margin-top:4px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em">Open browser console (F12) to see results</div>
-  </div>
-  <div class="sts">
-    <div class="stst">// WORKOUT TEMPLATES</div>
-    <div style="display:flex;gap:5px;margin-bottom:8px">
-      <input type="text" id="template-input" placeholder="Template name..." style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 9px;font-family:'Barlow Condensed',sans-serif;outline:none" onkeydown="if(event.key==='Enter')saveTemplate(this.value)">
-      <button class="st-ab" style="width:auto;margin:0;background:rgba(92,186,92,.1);border-color:rgba(92,186,92,.3);color:#5cba5c" onclick="saveTemplate(document.getElementById('template-input').value)">SAVE</button>
-    </div>
-    <div id="template-list" style="font-size:.75rem"></div>
-  </div>
-  <div class="sts">
-    <div class="stst">// THEME</div>
-    <div class="th-btns">
-      <button class="th-btn" onclick="setTheme('dark')">🌙 DARK</button>
-      <button class="th-btn" onclick="setTheme('light')">☀️ LIGHT</button>
+  <div class="sts" data-sec="user">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('user')"><span>// USER</span><span class="st-arrow" id="st-arrow-user">▾</span></div>
+    <div class="st-body">
+      <div id="stprofs"></div>
     </div>
   </div>
-  <div class="sts">
-    <div class="stst">// VERSION</div>
-    <div class="version-row">CURRENT <span id="app-version">v0.0.0</span></div>
-    <div class="version-row">LATEST <span id="latest-app-version">v0.0.0</span></div>
-    <div id="app-update-status" style="margin-top:8px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.76rem;color:var(--muted)">UP TO DATE</div>
-    <input id="app-update-url-input" class="fi" placeholder="Latest app URL (hosted ironlog.html)" style="margin-top:8px">
-    <button class="st-ab" onclick="saveAppUpdateUrl()">💾 SAVE UPDATE URL</button>
-    <button class="st-ab" onclick="checkForAppUpdate()">🔎 CHECK FOR UPDATE</button>
-    <button class="st-ab" onclick="updateAppNow()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⬆ UPDATE THIS DEVICE</button>
-    <button class="st-ab" onclick="publishCurrentVersion()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">📢 PUBLISH THIS VERSION</button>
+  <div class="sts" data-sec="data">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('data')"><span>// DATA</span><span class="st-arrow" id="st-arrow-data">▾</span></div>
+    <div class="st-body">
+      <button class="st-ab" onclick="pushUpdatesNow()" style="color:#60a5fa;border-color:rgba(96,165,250,.35)">☁ PUSH UPDATES NOW</button>
+      <button class="st-ab" onclick="cleanupDuplicatePRs()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">🧹 CLEAN DUPLICATE PRS</button>
+      <button class="st-ab" onclick="exportCSV()">📥 EXPORT CSV</button>
+      <label class="st-ab" style="cursor:pointer">📤 IMPORT CSV<input type="file" id="cii" accept=".csv" style="display:none"></label>
+    </div>
+  </div>
+  <div class="sts" data-sec="management">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('management')"><span>// MANAGEMENT</span><span class="st-arrow" id="st-arrow-management">▾</span></div>
+    <div class="st-body">
+      <div id="mg-tabs" class="th-btns"></div>
+      <div id="mg-body" style="margin-top:8px"></div>
+    </div>
+  </div>
+  <div class="sts" data-sec="admin" id="admin-settings-block" style="display:none">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('admin')"><span>// ADMIN</span><span class="st-arrow" id="st-arrow-admin">▾</span></div>
+    <div class="st-body">
+      <button class="st-ab" onclick="openAdminDataPage()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">📊 OPEN ADMIN DATA TABLES</button>
+    </div>
+  </div>
+  <div class="sts" data-sec="debug">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('debug')"><span>// DEBUG</span><span class="st-arrow" id="st-arrow-debug">▾</span></div>
+    <div class="st-body">
+      <button class="st-ab" onclick="debugFirebase()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">🔍 CHECK FIREBASE DOCS</button>
+      <button class="st-ab" onclick="forceMigrate()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⚡ FORCE RE-MIGRATE DATA</button>
+      <div style="font-size:.7rem;color:var(--muted);margin-top:4px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em">Open browser console (F12) to see results</div>
+    </div>
+  </div>
+  <div class="sts" data-sec="templates">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('templates')"><span>// WORKOUT TEMPLATES</span><span class="st-arrow" id="st-arrow-templates">▾</span></div>
+    <div class="st-body">
+      <div style="display:flex;gap:5px;margin-bottom:8px">
+        <input type="text" id="template-input" placeholder="Template name..." style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 9px;font-family:'Barlow Condensed',sans-serif;outline:none" onkeydown="if(event.key==='Enter')saveTemplate(this.value)">
+        <button class="st-ab" style="width:auto;margin:0;background:rgba(92,186,92,.1);border-color:rgba(92,186,92,.3);color:#5cba5c" onclick="saveTemplate(document.getElementById('template-input').value)">SAVE</button>
+      </div>
+      <div id="template-list" style="font-size:.75rem"></div>
+    </div>
+  </div>
+  <div class="sts" data-sec="theme">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('theme')"><span>// THEME</span><span class="st-arrow" id="st-arrow-theme">▾</span></div>
+    <div class="st-body">
+      <div class="th-btns">
+        <button class="th-btn" onclick="setTheme('dark')">🌙 DARK</button>
+        <button class="th-btn" onclick="setTheme('light')">☀️ LIGHT</button>
+      </div>
+    </div>
+  </div>
+  <div class="sts" data-sec="version">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('version')"><span>// VERSION</span><span class="st-arrow" id="st-arrow-version">▾</span></div>
+    <div class="st-body">
+      <div class="version-row">CURRENT <span id="app-version">v0.0.0</span></div>
+      <div class="version-row">LATEST <span id="latest-app-version">v0.0.0</span></div>
+      <div id="app-update-status" style="margin-top:8px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.76rem;color:var(--muted)">UP TO DATE</div>
+      <input id="app-update-url-input" class="fi" placeholder="Latest app URL (hosted ironlog.html)" style="margin-top:8px">
+      <button class="st-ab" onclick="saveAppUpdateUrl()">💾 SAVE UPDATE URL</button>
+      <button class="st-ab" onclick="checkForAppUpdate()">🔎 CHECK FOR UPDATE</button>
+      <button class="st-ab" onclick="updateAppNow()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⬆ UPDATE THIS DEVICE</button>
+      <button class="st-ab" onclick="publishCurrentVersion()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">📢 PUBLISH THIS VERSION</button>
+    </div>
   </div>
 </div>
 
