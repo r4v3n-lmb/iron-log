@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.19";
+  const APP_VERSION = "v1.0.20";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -74,6 +74,7 @@
   let authInitialized = false;
   const THEME_COLORS = ["#f72585","#4361ee","#2ec4b6","#7b2d8b","#f0c040","#5cba5c","#ef4444","#14b8a6","#3b82f6"];
   function canManageWorkoutParticipants(){ return activeProfile==="revan"; }
+  function isAdminUser(){ return activeProfile==="revan"; }
 
   const ACCOUNTS_DOC = "accounts";
   function toProfileKey(name){
@@ -546,6 +547,7 @@
     activeDay=null; panelCollapsed=false;
     document.getElementById("day-panel").style.display="none";
     updateLogoColor(); renderSettingsProfiles(); loadData();
+    renderAdminSettingsBlock();
     toast(`👤 ${PROFILES[pk].label}`);
     closeSettings();
   };
@@ -2614,7 +2616,11 @@
   };
 
   // ─── SETTINGS ─────
-  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); };
+  function renderAdminSettingsBlock(){
+    const el=document.getElementById("admin-settings-block");
+    if(el) el.style.display=isAdminUser() ? "block" : "none";
+  }
+  window.openSettings=function(){ document.getElementById("stp").classList.add("open"); document.getElementById("sto").style.display="block"; renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
@@ -2771,6 +2777,165 @@
     toast(`🗑 Deleted ${name}`);
   };
   window.setTheme=function(t){ if(t==="light")document.documentElement.classList.add("light-mode"); else document.documentElement.classList.remove("light-mode"); localStorage.setItem("ironlog_theme",t); };
+
+  function escHtml(v){
+    return String(v ?? "").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m]));
+  }
+  function buildTable(title, columns, rows){
+    const head = columns.map(c=>`<th>${escHtml(c)}</th>`).join("");
+    const body = rows.length ? rows.map(r=>`<tr>${columns.map(c=>`<td>${escHtml(r[c]??"")}</td>`).join("")}</tr>`).join("")
+      : `<tr><td colspan="${columns.length}" style="text-align:center;color:var(--muted)">No records</td></tr>`;
+    return `<section class="adm-card">
+      <div class="adm-title">${escHtml(title)} <span class="adm-count">${rows.length}</span></div>
+      <div class="adm-table-wrap"><table class="adm-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>
+    </section>`;
+  }
+  window.closeAdminDataPage=function(){
+    const el=document.getElementById("admin-page");
+    if(el) el.style.display="none";
+  };
+  window.openAdminDataPage=async function(){
+    if(!isAdminUser()){
+      toast("Admin access is only available for Revan");
+      return;
+    }
+    closeSettings();
+    const el=document.getElementById("admin-page");
+    if(!el) return;
+    el.style.display="block";
+    await refreshAdminDataTables();
+  };
+  window.refreshAdminDataTables=async function(){
+    if(!isAdminUser()) return;
+    const root=document.getElementById("admin-table-root");
+    if(!root) return;
+    root.innerHTML=`<div style="color:var(--muted);padding:12px">Loading admin data...</div>`;
+    try{
+      const [sharedSnap,accountsSnap]=await Promise.all([
+        getDocFromServer(doc(db,"ironlog",SHARED_DOC)),
+        getDocFromServer(doc(db,"ironlog",ACCOUNTS_DOC))
+      ]);
+      const shared=sharedSnap.exists()?sharedSnap.data():{};
+      const accounts=accountsSnap.exists()?(accountsSnap.data()?.users||{}):{};
+      const profileData=shared.profileData||{};
+
+      const userRows=Object.keys(accounts).map(pk=>{
+        const a=accounts[pk]||{};
+        return {
+          key:pk,
+          name:a.name||pk,
+          pin:a.pin||"",
+          height_cm:a.height||"",
+          water_l:a.water||"",
+          protein_g:a.protein||"",
+          color:a.color||"",
+          created_at:a.createdAt||""
+        };
+      });
+
+      const workoutRows=[];
+      Object.keys(profileData).forEach(pk=>{
+        const wo=profileData[pk]?.workouts||{};
+        Object.keys(wo).sort().forEach(date=>{
+          Object.keys(wo[date]||{}).forEach(dayKey=>{
+            const s=wo[date][dayKey]||{};
+            workoutRows.push({
+              user:pk,
+              date,
+              day_key:dayKey,
+              done:!!s.done,
+              exercise_entries:Object.keys(s.exercises||{}).length,
+              note:(s.notes||"").slice(0,80)
+            });
+          });
+        });
+      });
+
+      const exerciseMap=new Map();
+      Object.keys(profileData).forEach(pk=>{
+        const plan=profileData[pk]?.plan||{};
+        Object.keys(plan).forEach(dayKey=>{
+          (plan[dayKey]?.exercises||[]).forEach(ex=>{
+            const name=String(ex?.name||"").trim();
+            if(!name) return;
+            const k=`${pk}|${name.toLowerCase()}`;
+            if(!exerciseMap.has(k)){
+              exerciseMap.set(k,{
+                user:pk,
+                exercise:name,
+                source:"plan",
+                sets:ex.sets??"",
+                reps:ex.reps??"",
+                muscle_group:getMuscleGroup(name)
+              });
+            }
+          });
+        });
+        const wo=profileData[pk]?.workouts||{};
+        Object.keys(wo).forEach(date=>{
+          Object.keys(wo[date]||{}).forEach(dayKey=>{
+            const exs=wo[date][dayKey]?.exercises||{};
+            Object.keys(exs).forEach(exKey=>{
+              const clean=stripParticipantPrefix(stripParticipantPrefix(String(exKey||""))).trim();
+              if(!clean) return;
+              const k=`${pk}|${clean.toLowerCase()}`;
+              if(!exerciseMap.has(k)){
+                exerciseMap.set(k,{
+                  user:pk,
+                  exercise:clean,
+                  source:"logged",
+                  sets:"",
+                  reps:"",
+                  muscle_group:getMuscleGroup(clean)
+                });
+              }
+            });
+          });
+        });
+      });
+      const exerciseRows=Array.from(exerciseMap.values()).sort((a,b)=>`${a.user}${a.exercise}`.localeCompare(`${b.user}${b.exercise}`));
+
+      const collectedRows=[];
+      Object.keys(profileData).forEach(pk=>{
+        const bw=profileData[pk]?.bodyweight||{};
+        Object.keys(bw).sort().forEach(date=>{
+          collectedRows.push({
+            user:pk,
+            date,
+            type:"bodyweight",
+            value:bw[date],
+            water_l:"",
+            protein_g:"",
+            sleep_h:"",
+            soreness:""
+          });
+        });
+        const h=profileData[pk]?.health||{};
+        Object.keys(h).sort().forEach(date=>{
+          const v=h[date]||{};
+          collectedRows.push({
+            user:pk,
+            date,
+            type:"health",
+            value:"",
+            water_l:v.water??"",
+            protein_g:v.protein??"",
+            sleep_h:v.sleep??"",
+            soreness:v.soreness??""
+          });
+        });
+      });
+
+      root.innerHTML = [
+        buildTable("Users",["key","name","pin","height_cm","water_l","protein_g","color","created_at"],userRows),
+        buildTable("Workouts",["user","date","day_key","done","exercise_entries","note"],workoutRows),
+        buildTable("Exercises",["user","exercise","source","sets","reps","muscle_group"],exerciseRows),
+        buildTable("Collected Data",["user","date","type","value","water_l","protein_g","sleep_h","soreness"],collectedRows)
+      ].join("");
+    }catch(e){
+      root.innerHTML=`<div style="color:#ff9b9b;padding:12px">Failed to load admin data.</div>`;
+    }
+  };
 
   // ─── DASHBOARD TOGGLE ───
   window.toggleDashboard=function(){
@@ -3226,6 +3391,20 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 #mg-tabs{grid-template-columns:repeat(3,1fr)}
 .version-row{font-family:'Barlow Condensed',sans-serif;font-size:.82rem;letter-spacing:.12em;color:var(--text);padding:8px 10px;background:var(--bg3);border:1px solid var(--border)}
 
+/* ADMIN PAGE */
+#admin-page{display:none;position:fixed;inset:0;z-index:1300;background:var(--bg);overflow:auto}
+.adm-head{position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 16px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.adm-title-main{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.16em;font-size:.95rem}
+.adm-actions{display:flex;gap:6px;flex-wrap:wrap}
+.adm-wrap{padding:14px 16px;display:grid;gap:12px}
+.adm-card{border:1px solid var(--border);background:var(--bg3);padding:10px;border-radius:var(--radius)}
+.adm-title{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.11em;font-size:.8rem;color:var(--muted);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.adm-count{color:var(--text)}
+.adm-table-wrap{overflow:auto;border:1px solid var(--border)}
+.adm-table{width:100%;border-collapse:collapse;font-size:.78rem}
+.adm-table th,.adm-table td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);text-align:left;white-space:nowrap}
+.adm-table th{position:sticky;top:0;background:var(--bg2);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.72rem;color:var(--muted)}
+
 /* TEMPLATES */
 .template-item{display:flex;justify-content:space-between;align-items:center;padding:11px;background:var(--bg2);border:1px solid var(--border);margin-bottom:5px;border-radius:3px}
 .template-name{font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:.1em;flex:1}
@@ -3364,6 +3543,17 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   </div>
 </div>
 
+<div id="admin-page">
+  <div class="adm-head">
+    <div class="adm-title-main">IRON <span class="logo-log">LOG</span> · ADMIN DATA</div>
+    <div class="adm-actions">
+      <button class="st-ab" style="width:auto;margin:0" onclick="refreshAdminDataTables()">REFRESH</button>
+      <button class="st-ab" style="width:auto;margin:0" onclick="closeAdminDataPage()">CLOSE</button>
+    </div>
+  </div>
+  <div class="adm-wrap" id="admin-table-root"></div>
+</div>
+
 <!-- HEADER -->
 <div class="hdr">
   <div class="logo">IRON<span class="logo-log">LOG</span></div>
@@ -3456,6 +3646,10 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <div class="stst">// MANAGEMENT</div>
     <div id="mg-tabs" class="th-btns"></div>
     <div id="mg-body" style="margin-top:8px"></div>
+  </div>
+  <div class="sts" id="admin-settings-block" style="display:none">
+    <div class="stst">// ADMIN</div>
+    <button class="st-ab" onclick="openAdminDataPage()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">📊 OPEN ADMIN DATA TABLES</button>
   </div>
   <div class="sts">
     <div class="stst">// DEBUG</div>
