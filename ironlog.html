@@ -1752,10 +1752,7 @@
     }
 
     h+=`<div class="prw">
-        <svg viewBox="0 0 36 36" class="prg">
-          <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#222" stroke-width="3"/>
-          <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="${day.color}" stroke-width="3" stroke-dasharray="${pct}, 100" stroke-linecap="round"/>
-        </svg>
+        <div class="prb"><div class="prbf" style="width:${pct}%;background:${day.color}"></div></div>
         <span class="pp" style="color:${day.color}">${pct}%</span>
       </div>
     </div>
@@ -3531,8 +3528,9 @@ html.light-mode .auth-msg{color:#b42318}
 .ptv{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;min-width:40px;font-size:.85rem}
 .tcb{width:24px;height:22px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font-size:.7rem;display:inline-flex;align-items:center;justify-content:center;transition:background .1s}
 .tcb:hover{background:var(--bg4)}
-.prw{display:flex;align-items:center;gap:5px}
-.prg{width:36px;height:36px}
+.prw{display:flex;align-items:center;gap:7px;min-width:130px}
+.prb{width:90px;height:8px;background:rgba(255,255,255,.08);border:1px solid var(--border);overflow:hidden}
+.prbf{height:100%;width:0;transition:width .25s ease}
 .pp{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;font-size:.85rem}
 .pct{padding:7px 13px;border-bottom:1px solid var(--border);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.75rem;color:var(--muted);cursor:pointer;background:var(--bg2);display:flex;align-items:center;gap:5px;line-height:1.25}
 .pct:hover{color:var(--text);background:var(--bg3)}
