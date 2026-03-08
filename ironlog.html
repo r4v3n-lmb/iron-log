@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.29";
+  const APP_VERSION = "v1.0.30";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -608,13 +608,19 @@
     const p=PROFILES[activeProfile];
     if(el && p) el.style.color=p.color;
   }
-  window.openTodayWorkout=function(){
+  window.openTodayWorkout=async function(){
     const todayKey=getTodayDayKey();
     if(!todayKey){
       toast("No workout planned for today");
       return;
     }
+    const prefilled = prefillWorkoutFromHistory(getTodayStr(), todayKey);
     selectDay(todayKey);
+    if(prefilled > 0){
+      await saveData();
+      toast(`⚡ Prefilled ${prefilled} fields from last session`);
+    }
+    startSessionTimer();
     window.scrollTo({top:0,behavior:"smooth"});
   };
   window.openAddWorkoutQuick=function(){
@@ -696,7 +702,31 @@
     if(!state.workouts[date][key]) state.workouts[date][key]={done:false,exercises:{},notes:""};
     if(!state.workouts[date][key].notes) state.workouts[date][key].notes="";
     if(!state.workouts[date][key].workoutTime || typeof state.workouts[date][key].workoutTime!=="object") state.workouts[date][key].workoutTime={};
+    if(!state.workouts[date][key].sessionMeta || typeof state.workouts[date][key].sessionMeta!=="object") state.workouts[date][key].sessionMeta={};
     return state.workouts[date][key];
+  }
+  function prefillWorkoutFromHistory(date,key){
+    const day=WORKOUT_PLAN[key];
+    if(!day) return 0;
+    const wo=getWorkout(date,key);
+    const participants=getSessionParticipants(date,key);
+    let filled=0;
+    day.exercises.forEach(ex=>{
+      if(ex.sets===0) return;
+      participants.forEach(pp=>{
+        const {key:exKey,data:_ed}=getExData(wo.exercises,pp,ex.name);
+        const ed=_ed||{};
+        if(!wo.exercises[exKey]) wo.exercises[exKey]=ed;
+        if(!String(ed.weight||"").trim()){
+          const lw=getLastWeight(key,ex.name,pp);
+          if(lw?.weight>0){
+            wo.exercises[exKey].weight=String(lw.weight);
+            filled++;
+          }
+        }
+      });
+    });
+    return filled;
   }
   function getSessionElapsedMinutes(){
     if(!sessionStart) return 0;
@@ -959,6 +989,13 @@
       const w=e?.weight; if(w)return{weight:parseFloat(w),date:prev[i]};
     }
     return null;
+  }
+  function getWarmupSuggestion(weight){
+    const w=parseFloat(weight||0);
+    if(!w||w<=0) return "";
+    const round=v=>Math.max(5,Math.round(v/2.5)*2.5);
+    const a=round(w*0.4), b=round(w*0.6), c=round(w*0.8);
+    return `${a}x8 · ${b}x5 · ${c}x3`;
   }
   function getOverloadSuggestion(key,ex,participant="revan"){
     if(ex.sets===0)return null;
@@ -1752,7 +1789,7 @@
     }
 
     h+=`<div class="prw">
-        <div class="prb"><div class="prbf" style="width:${pct}%;background:${day.color}"></div></div>
+        <div class="pbar"><div class="pbarf" style="width:${pct}%;background:${day.color}"></div></div>
         <span class="pp" style="color:${day.color}">${pct}%</span>
       </div>
     </div>
@@ -1796,6 +1833,7 @@
                 const {key:exKey,data:_rd}=getExData(wo.exercises,pp,ex.name); const ed=_rd||{checked:false,weight:"",actualReps:""};
                 const lw=ic?null:getLastWeight(key,ex.name,pp);
                 const ol=ic?null:getOverloadSuggestion(key,ex,pp);
+                const warm=ic?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
                 const dis=!isEditable?'disabled':'';
                 const pcolor=PROFILES[pp]?.color||'#888';
                 return `<div class="pcol" style="--pcolor:${pcolor}">
@@ -1804,6 +1842,7 @@
                   `<input type="number" class="ari" placeholder="${ex.reps}" value="${ed.actualReps||''}" ${dis} onchange="setReps('${key}','${exKey}',this.value)" onblur="setReps('${key}','${exKey}',this.value)">
                    <div class="ww"><input type="number" class="wi" placeholder="—" value="${ed.weight||''}" ${dis} onchange="setWt('${key}','${exKey}',this.value,'${pp}')" onblur="setWt('${key}','${exKey}',this.value,'${pp}')"><span class="wu">kg</span></div>`}
                   ${ol?`<div class="olb-sm">⬆${ol.suggestedWeight}kg</div>`:lw?`<div class="lwh-sm">↑${lw.weight}kg</div>`:''}
+                  ${warm?`<div class="wup-sm">WU ${warm}</div>`:''}
                 </div>`;
               }).join('')}
             </div>
@@ -1833,6 +1872,8 @@
           const lwh=lw?`<span class="lwh">↑${lw.weight}kg</span>`:'';
           const ol=ic?null:getOverloadSuggestion(key,ex,part);
           const olb=ol?`<span class="olb">⬆ Try ${ol.suggestedWeight}kg</span>`:'';
+          const warm=ic?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
+          const wup=warm?`<div class="wup">WU ${warm}</div>`:'';
           const dis=!isEditable?'disabled':'';
           const exId=getExerciseAnimId(ex);
           h+=`<div class="er ${ed.checked?'done':''}" data-exid="${exId}" ondragover="onExerciseDragOver(event)" ondragleave="onExerciseDragLeave(event)" ondrop="onExerciseDrop(event,'${key}',${i})">
@@ -1840,6 +1881,7 @@
             <div class="enc">
               <span class="en" onclick="showExerciseHistory('${displayName.replace(/'/g, "\\'")}')" style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(232,93,4,0.3);text-underline-offset:2px">${displayName}${prb}</span>
               ${olb||lwh?`<div class="ehi">${olb}${!ol?lwh:''}</div>`:''}
+              ${wup}
             </div>
             <span class="et">${ic?ex.reps:`${ex.sets}×${ex.reps}`}</span>
             ${ic?`<span class="et" style="color:#555">—</span>`:`<input type="number" class="ari" placeholder="${ex.reps}" value="${ed.actualReps||''}" ${dis} onchange="setReps('${key}','${exKey}',this.value)" onblur="setReps('${key}','${exKey}',this.value)">`}
@@ -1870,6 +1912,17 @@
           <div class="snote-label">📝 SESSION NOTE</div>
           <div class="snote-text">${wo.notes}</div>
         </div>`;
+      }
+      if(wo.done && wo.sessionMeta){
+        const sm=wo.sessionMeta||{};
+        const rpe=sm.rpe?`RPE ${sm.rpe}`:"";
+        const pain=(sm.painLevel&&sm.painLevel!=="none")?`Pain: ${sm.painLevel}${sm.painArea?` (${sm.painArea})`:''}`:"";
+        if(rpe||pain){
+          h+=`<div class="snote-wrap snote-ro" style="margin-top:8px">
+            <div class="snote-label">✅ FINISH SNAPSHOT</div>
+            <div class="snote-text">${[rpe,pain].filter(Boolean).join(" • ")}</div>
+          </div>`;
+        }
       }
 
       h+=`<button class="donebtn ${wo.done?'da':''}" style="--c:${day.color}" onclick="markDone('${key}')">${wo.done?'✓ COMPLETED':'MARK AS DONE'}</button>`;
@@ -2022,6 +2075,43 @@
     wo.notes=el.value.trim();
     await saveData(); toast("📝 Note saved");
   };
+  window.openQuickFinish=function(key){
+    const wo=getWorkout(activeDate,key);
+    const sm=wo.sessionMeta||{};
+    const m=document.getElementById("qfm");
+    if(!m) return;
+    m.dataset.key=key;
+    document.getElementById("qfm-rpe").value=sm.rpe||"";
+    document.getElementById("qfm-pain-level").value=sm.painLevel||"none";
+    document.getElementById("qfm-pain-area").value=sm.painArea||"";
+    document.getElementById("qfm-note").value=sm.finishNote||"";
+    m.style.display="flex";
+  };
+  window.closeQuickFinish=function(){
+    const m=document.getElementById("qfm");
+    if(m) m.style.display="none";
+  };
+  window.confirmQuickFinish=async function(){
+    const m=document.getElementById("qfm");
+    const key=m?.dataset?.key;
+    if(!key) return;
+    const wo=getWorkout(activeDate,key);
+    const rpe=parseFloat(document.getElementById("qfm-rpe")?.value||0);
+    const painLevel=(document.getElementById("qfm-pain-level")?.value||"none").trim();
+    const painArea=(document.getElementById("qfm-pain-area")?.value||"").trim();
+    const finishNote=(document.getElementById("qfm-note")?.value||"").trim();
+    wo.sessionMeta={
+      ...(wo.sessionMeta||{}),
+      rpe: rpe>0?Math.max(1,Math.min(10,Math.round(rpe*10)/10)):null,
+      painLevel,
+      painArea,
+      finishNote,
+      updatedAt:new Date().toISOString()
+    };
+    if(finishNote && !wo.notes) wo.notes=finishNote;
+    closeQuickFinish();
+    await window.markDone(key,true);
+  };
 
   window.toggleCollapse=function(){ panelCollapsed=!panelCollapsed; if(activeDay)renderDayPanel(activeDay); };
   function formatDate(s){ return new Date(s+"T12:00:00").toLocaleDateString("en-ZA",{weekday:"long",day:"numeric",month:"long"}).toUpperCase(); }
@@ -2138,11 +2228,16 @@
     if(!wo.exercises[exName])wo.exercises[exName]={};
     wo.exercises[exName].actualReps=val; await saveData();
   };
-  window.markDone=async function(key){
+  window.markDone=async function(key,skipFinishCapture=false){
     // Auto-save session note before marking done
     const snEl=document.getElementById(`snote-${key}`);
     if(snEl){ const wo=getWorkout(activeDate,key); wo.notes=snEl.value.trim(); }
-    const wo=getWorkout(activeDate,key); wo.done=!wo.done;
+    const wo=getWorkout(activeDate,key);
+    if(!wo.done && !skipFinishCapture){
+      openQuickFinish(key);
+      return;
+    }
+    wo.done=!wo.done;
     if(wo.done){
       const trackedMins=getSessionElapsedMinutes();
       if(trackedMins>0){
@@ -3529,8 +3624,8 @@ html.light-mode .auth-msg{color:#b42318}
 .tcb{width:24px;height:22px;border:1px solid var(--border);background:var(--bg2);color:var(--text);cursor:pointer;font-size:.7rem;display:inline-flex;align-items:center;justify-content:center;transition:background .1s}
 .tcb:hover{background:var(--bg4)}
 .prw{display:flex;align-items:center;gap:7px;min-width:130px}
-.prb{width:90px;height:8px;background:rgba(255,255,255,.08);border:1px solid var(--border);overflow:hidden}
-.prbf{height:100%;width:0;transition:width .25s ease}
+.pbar{width:90px;height:8px;background:rgba(255,255,255,.08);border:1px solid var(--border);overflow:hidden}
+.pbarf{height:100%;width:0;transition:width .25s ease}
 .pp{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;font-size:.85rem}
 .pct{padding:7px 13px;border-bottom:1px solid var(--border);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.75rem;color:var(--muted);cursor:pointer;background:var(--bg2);display:flex;align-items:center;gap:5px;line-height:1.25}
 .pct:hover{color:var(--text);background:var(--bg3)}
@@ -3559,6 +3654,7 @@ html.light-mode .er:hover{background:rgba(0,0,0,.02)}
 .ehi{margin-top:2px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 .lwh{color:#9999bb;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem}
 .olb{padding:2px 6px;border:1px solid rgba(92,186,92,.5);background:rgba(92,186,92,.09);color:#b7f3b7;font-family:'Barlow Condensed',sans-serif;font-size:.68rem;letter-spacing:.1em}
+.wup{margin-top:3px;color:#f0c040;font-family:'Barlow Condensed',sans-serif;font-size:.66rem;letter-spacing:.06em}
 .prb{padding:2px 6px;border:1px solid rgba(240,192,64,.5);background:rgba(240,192,64,.09);color:#ffd98a;font-family:'Barlow Condensed',sans-serif;font-size:.68rem;letter-spacing:.1em}
 .et{width:60px;text-align:center;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;color:var(--muted);font-size:.85rem}
 .ari,.wi{width:60px;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 5px;text-align:center;outline:none;font-family:'Barlow Condensed',sans-serif}
@@ -3597,6 +3693,7 @@ html.light-mode .er:hover{background:rgba(0,0,0,.02)}
 .olb-sm,.lwh-sm{font-size:.62rem;letter-spacing:.06em;text-align:center;padding:1px 4px;margin-top:2px}
 .olb-sm{border:1px solid rgba(92,186,92,.4);color:#b7f3b7;background:rgba(92,186,92,.07)}
 .lwh-sm{color:#9999bb}
+.wup-sm{font-size:.58rem;letter-spacing:.05em;text-align:center;padding:1px 3px;margin-top:2px;color:#f0c040}
 @media(max-width:500px){
   .pcol{min-width:88px;width:88px;padding:5px 5px}
   .pcol .ari,.pcol .wi{width:44px;font-size:.78rem}
@@ -3807,7 +3904,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .nav-rst:hover{color:var(--text);background:var(--bg3)}
 
 /* MODALS */
-#em,#svm,#adm,#swm,#exercise-history-modal{display:none;position:fixed;inset:0;z-index:350;background:rgba(0,0,0,.88);align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+#em,#svm,#adm,#swm,#qfm,#exercise-history-modal{display:none;position:fixed;inset:0;z-index:350;background:rgba(0,0,0,.88);align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
 .mbox{width:100%;max-width:660px;background:var(--bg2);border:1px solid var(--border);box-shadow:var(--shadow);margin:auto}
 .mbox-sm{max-width:400px}
 .mhd{display:flex;justify-content:space-between;align-items:center;padding:12px 15px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg2);z-index:1}
@@ -4179,6 +4276,43 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <div class="mft">
       <button class="mcc" onclick="closeSwap()">CANCEL</button>
       <button class="msc" onclick="confirmSwap()">CONFIRM SWAP</button>
+    </div>
+  </div>
+</div>
+
+<!-- QUICK FINISH MODAL -->
+<div id="qfm">
+  <div class="mbox mbox-sm">
+    <div class="mhd">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;color:var(--accent)">✅ QUICK FINISH</span>
+      <button class="mcb" onclick="closeQuickFinish()">×</button>
+    </div>
+    <div class="mbd" style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div class="fl">SESSION RPE (1-10)</div>
+        <input id="qfm-rpe" class="fi" type="number" min="1" max="10" step="0.5" placeholder="e.g. 8.5">
+      </div>
+      <div>
+        <div class="fl">PAIN FLAG</div>
+        <select id="qfm-pain-level" class="fsel">
+          <option value="none">None</option>
+          <option value="mild">Mild</option>
+          <option value="moderate">Moderate</option>
+          <option value="severe">Severe</option>
+        </select>
+      </div>
+      <div>
+        <div class="fl">PAIN AREA (optional)</div>
+        <input id="qfm-pain-area" class="fi" placeholder="e.g. left shoulder">
+      </div>
+      <div>
+        <div class="fl">FINISH NOTE (optional)</div>
+        <textarea id="qfm-note" class="fi" style="min-height:78px;resize:vertical" placeholder="How did this session feel?"></textarea>
+      </div>
+    </div>
+    <div class="mft">
+      <button class="mcc" onclick="closeQuickFinish()">CANCEL</button>
+      <button class="msc" onclick="confirmQuickFinish()">SAVE & COMPLETE</button>
     </div>
   </div>
 </div>
