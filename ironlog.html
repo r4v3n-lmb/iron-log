@@ -1008,6 +1008,83 @@
     if(sw&&bh)return{currentWeight:sessions[1].weight,suggestedWeight:Math.ceil((sessions[1].weight*1.05)/2.5)*2.5};
     return null;
   }
+  function getExerciseSessions(key, exName, participant="revan", limit=4){
+    const rows=[];
+    Object.keys(state.workouts||{}).sort().forEach(d=>{
+      const wo=state.workouts?.[d]?.[key];
+      if(!wo?.done) return;
+      const {data:e}=getExData(wo.exercises||{},participant,exName);
+      if(!e?.checked) return;
+      const w=parseFloat(e.weight||0);
+      const r=parseInt(e.actualReps||0,10)||0;
+      if(w<=0 || r<=0) return;
+      rows.push({date:d,weight:w,reps:r});
+    });
+    return rows.slice(-limit);
+  }
+  function getProgressInsight(key,ex,participant="revan"){
+    if(!ex || ex.sets===0) return null;
+    const target=parseInt(ex.reps||0,10)||0;
+    if(!target) return null;
+    const s=getExerciseSessions(key,ex.name,participant,4);
+    if(s.length<2) return null;
+    const last=s[s.length-1];
+    const prev=s[s.length-2];
+    if(last.weight===prev.weight && last.reps>=target && prev.reps>=target){
+      return {kind:"next", suggestedWeight:Math.ceil((last.weight*1.025)/2.5)*2.5, note:"Ready to progress"};
+    }
+    if(last.reps>=target+2 && last.weight>0){
+      return {kind:"next", suggestedWeight:Math.ceil((last.weight*1.025)/2.5)*2.5, note:"Strong rep buffer"};
+    }
+    if(s.length>=3){
+      const t=s.slice(-3);
+      const sameWeight=t.every(x=>x.weight===t[0].weight);
+      const noRepGain=t[2].reps<=t[1].reps && t[1].reps<=t[0].reps;
+      const belowTarget=t.every(x=>x.reps<target);
+      if(sameWeight && noRepGain && belowTarget){
+        return {kind:"plateau", note:"Plateau detected"};
+      }
+    }
+    return null;
+  }
+  function getOverdueLiftNudges(){
+    const nudges=[];
+    const today=getTodayStr();
+    sortedDayKeys().forEach(key=>{
+      const day=WORKOUT_PLAN[key];
+      (day?.exercises||[]).forEach(ex=>{
+        const sessions=getExerciseSessions(key,ex.name,activeProfile,6);
+        if(sessions.length<3) return;
+        let improvedAt=sessions[0].date;
+        let best=sessions[0].weight;
+        sessions.forEach(s=>{ if(s.weight>best){ best=s.weight; improvedAt=s.date; } });
+        const days=Math.floor((new Date(`${today}T12:00:00`)-new Date(`${improvedAt}T12:00:00`))/(1000*60*60*24));
+        if(days>=21){
+          nudges.push({id:`overdue_${key}_${normalizeExerciseName(ex.name)}`, title:`Overdue to progress ${ex.name}`, detail:`No load increase in ${days} days. Add a progression set this week.`});
+        }
+      });
+    });
+    return nudges.slice(0,3);
+  }
+  function shouldSuggestDeload(){
+    const today=new Date(`${getTodayStr()}T12:00:00`);
+    const recent=[];
+    for(let i=0;i<4;i++){
+      const d=new Date(today); d.setDate(today.getDate()-i);
+      const ds=d.toISOString().split("T")[0];
+      const h=state.health?.[ds];
+      if(h) recent.push(h);
+    }
+    if(recent.length<2) return false;
+    const avgSleep=recent.reduce((a,b)=>a+Number(b.sleep||0),0)/recent.length;
+    const avgSoreness=recent.reduce((a,b)=>a+Number(b.soreness||0),0)/recent.length;
+    let missed=0;
+    for(let i=1;i<=7;i++){
+      const d=new Date(today); d.setDate(today.getDate()-i);
+      if(isSkipped(d.toISOString().split("T")[0])) missed++;
+    }
+    return (avgSleep<6.2 && avgSoreness>=7) || missed>=3;
+  }
 
   // ─── EXERCISE HISTORY ───
   function getExerciseHistory(exerciseName, participant = activeProfile) {
@@ -1723,6 +1800,9 @@
     const pct=total>0?Math.round(done/total*100):0;
     const ton=calcSessionTonnage(activeDate,key);
     const bw=getPBW(activeProfile,isToday?getTodayStr():activeDate)||"";
+    const exerciseInsights=(day.exercises||[]).map(ex=>getProgressInsight(key,ex,activeProfile)).filter(Boolean);
+    const hasPlateau=exerciseInsights.some(x=>x.kind==="plateau");
+    const hasDeload=shouldSuggestDeload();
 
     let h=`<div class="ph" style="border-left:4px solid ${day.color}">
       <div class="phl">
@@ -1734,6 +1814,8 @@
           <span class="pd-inline">${formatDate(activeDate)}</span>
           ${!isEditable?`<span class="vob">VIEW ONLY</span>${isPastDate?'<button class="vob vob-btn" onclick="unlockActiveDate()">🔓 UNLOCK EXERCISES</button>':''}`:unlockedDates.has(activeDate)?'<span class="vob" style="border-color:rgba(92,186,92,.4);color:#b7f3b7">🔓 UNLOCKED</span>':''}
           ${ton>0?`<span class="ptons-inline">⚡ ${ton}kg</span>`:''}
+          ${hasPlateau?`<span class="vob prog-warn">PLATEAU</span>`:''}
+          ${hasDeload?`<span class="vob prog-caution">DELOAD RECOMMENDED</span>`:''}
           ${isEditable && trackableParticipants.length>1 ? `<div class="ph-partner">
             <span class="wt-label">TRACK:</span>
             ${trackableParticipants.map(pp=>{
@@ -1833,6 +1915,7 @@
                 const {key:exKey,data:_rd}=getExData(wo.exercises,pp,ex.name); const ed=_rd||{checked:false,weight:"",actualReps:""};
                 const lw=ic?null:getLastWeight(key,ex.name,pp);
                 const ol=ic?null:getOverloadSuggestion(key,ex,pp);
+                const pi=ic?null:getProgressInsight(key,ex,pp);
                 const warm=ic?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
                 const dis=!isEditable?'disabled':'';
                 const pcolor=PROFILES[pp]?.color||'#888';
@@ -1842,6 +1925,8 @@
                   `<input type="number" class="ari" placeholder="${ex.reps}" value="${ed.actualReps||''}" ${dis} onchange="setReps('${key}','${exKey}',this.value)" onblur="setReps('${key}','${exKey}',this.value)">
                    <div class="ww"><input type="number" class="wi" placeholder="—" value="${ed.weight||''}" ${dis} onchange="setWt('${key}','${exKey}',this.value,'${pp}')" onblur="setWt('${key}','${exKey}',this.value,'${pp}')"><span class="wu">kg</span></div>`}
                   ${ol?`<div class="olb-sm">⬆${ol.suggestedWeight}kg</div>`:lw?`<div class="lwh-sm">↑${lw.weight}kg</div>`:''}
+                  ${!ol&&pi?.kind==="next"?`<div class="olb-sm">NEXT ${pi.suggestedWeight}kg</div>`:''}
+                  ${pi?.kind==="plateau"?`<div class="plt-sm">PLATEAU</div>`:''}
                   ${warm?`<div class="wup-sm">WU ${warm}</div>`:''}
                 </div>`;
               }).join('')}
@@ -1872,6 +1957,9 @@
           const lwh=lw?`<span class="lwh">↑${lw.weight}kg</span>`:'';
           const ol=ic?null:getOverloadSuggestion(key,ex,part);
           const olb=ol?`<span class="olb">⬆ Try ${ol.suggestedWeight}kg</span>`:'';
+          const pi=ic?null:getProgressInsight(key,ex,part);
+          const pib=!ol&&pi?.kind==="next"?`<span class="olb">NEXT ${pi.suggestedWeight}kg</span>`:'';
+          const plb=pi?.kind==="plateau"?`<span class="plt">PLATEAU</span>`:'';
           const warm=ic?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
           const wup=warm?`<div class="wup">WU ${warm}</div>`:'';
           const dis=!isEditable?'disabled':'';
@@ -1880,7 +1968,7 @@
             <label class="eck"><input type="checkbox" ${ed.checked?'checked':''} ${dis} onchange="togEx('${key}','${exKey}',this.checked)"><span class="ecm" style="--c:${day.color}"></span></label>
             <div class="enc">
               <span class="en" onclick="showExerciseHistory('${displayName.replace(/'/g, "\\'")}')" style="cursor:pointer;text-decoration:underline;text-decoration-color:rgba(232,93,4,0.3);text-underline-offset:2px">${displayName}${prb}</span>
-              ${olb||lwh?`<div class="ehi">${olb}${!ol?lwh:''}</div>`:''}
+              ${olb||lwh||pib||plb?`<div class="ehi">${olb}${pib}${plb}${!ol&&!pib?lwh:''}</div>`:''}
               ${wup}
             </div>
             <span class="et">${ic?ex.reps:`${ex.sets}×${ex.reps}`}</span>
@@ -3137,6 +3225,10 @@
     if(!recentPr){
       list.push({id:`pr_nudge_${today.slice(0,7)}`,type:"nudge",title:"No PR in the last 14 days",detail:"Try a progression set on your main lift this week."});
     }
+    getOverdueLiftNudges().forEach(n=>list.push({id:n.id,type:"nudge",title:n.title,detail:n.detail}));
+    if(shouldSuggestDeload()){
+      list.push({id:`deload_${today}`,type:"recovery",title:"Deload suggested",detail:"High fatigue signals detected (sleep/soreness/adherence). Consider a light day."});
+    }
     return list;
   }
   function renderNotifications(){
@@ -3611,6 +3703,8 @@ html.light-mode .auth-msg{color:#b42318}
 .pd-inline{font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;color:var(--muted);font-size:.68rem}
 .ptons-inline{color:#f0c040;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.72rem}
 .vob{display:inline-block;padding:2px 5px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:var(--muted);letter-spacing:.1em;font-size:.66rem}
+.prog-warn{border-color:rgba(244,63,94,.45);color:#ffb4c0;background:rgba(244,63,94,.12)}
+.prog-caution{border-color:rgba(240,192,64,.45);color:#ffd98a;background:rgba(240,192,64,.12)}
 .vob-btn{cursor:pointer}
 .vob-btn:hover{background:var(--bg4);color:var(--text)}
 .pbwr{display:flex;align-items:center;gap:4px}
@@ -3654,6 +3748,7 @@ html.light-mode .er:hover{background:rgba(0,0,0,.02)}
 .ehi{margin-top:2px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
 .lwh{color:#9999bb;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem}
 .olb{padding:2px 6px;border:1px solid rgba(92,186,92,.5);background:rgba(92,186,92,.09);color:#b7f3b7;font-family:'Barlow Condensed',sans-serif;font-size:.68rem;letter-spacing:.1em}
+.plt{padding:2px 6px;border:1px solid rgba(244,63,94,.5);background:rgba(244,63,94,.1);color:#ffb4c0;font-family:'Barlow Condensed',sans-serif;font-size:.68rem;letter-spacing:.1em}
 .wup{margin-top:3px;color:#f0c040;font-family:'Barlow Condensed',sans-serif;font-size:.66rem;letter-spacing:.06em}
 .prb{padding:2px 6px;border:1px solid rgba(240,192,64,.5);background:rgba(240,192,64,.09);color:#ffd98a;font-family:'Barlow Condensed',sans-serif;font-size:.68rem;letter-spacing:.1em}
 .et{width:60px;text-align:center;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;color:var(--muted);font-size:.85rem}
@@ -3693,6 +3788,7 @@ html.light-mode .er:hover{background:rgba(0,0,0,.02)}
 .olb-sm,.lwh-sm{font-size:.62rem;letter-spacing:.06em;text-align:center;padding:1px 4px;margin-top:2px}
 .olb-sm{border:1px solid rgba(92,186,92,.4);color:#b7f3b7;background:rgba(92,186,92,.07)}
 .lwh-sm{color:#9999bb}
+.plt-sm{font-size:.58rem;letter-spacing:.05em;text-align:center;padding:1px 3px;margin-top:2px;border:1px solid rgba(244,63,94,.4);color:#ffb4c0;background:rgba(244,63,94,.08)}
 .wup-sm{font-size:.58rem;letter-spacing:.05em;text-align:center;padding:1px 3px;margin-top:2px;color:#f0c040}
 @media(max-width:500px){
   .pcol{min-width:88px;width:88px;padding:5px 5px}

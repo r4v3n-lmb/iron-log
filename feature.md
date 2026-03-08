@@ -150,10 +150,10 @@ Exercise detail view should include:
 - [ ] Add "quick start from lock screen/PWA shortcut" entry point.
 
 ### Sprint B: Progression Intelligence
-- [ ] Add next-load recommendation panel per exercise.
-- [ ] Add plateau detection rule (no load or rep progress for 3+ sessions).
-- [ ] Add overdue progression notifications.
-- [ ] Add deload suggestion when fatigue/readiness thresholds fail.
+- [x] Add next-load recommendation badges per exercise.
+- [x] Add plateau detection rule (no load or rep progress for 3+ sessions).
+- [x] Add overdue progression notifications.
+- [x] Add deload suggestion when fatigue/readiness thresholds fail.
 
 ### Sprint C: History Drill-Down
 - [ ] Extend exercise history modal with best set and last 10 table.
