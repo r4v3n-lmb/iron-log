@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.28";
+  const APP_VERSION = "v1.0.29";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -48,8 +48,8 @@
   let WORKOUT_PLAN = {};
 
   const DEFAULT_ACCOUNTS = {
-    revan:  { name:"Revan",   pin:"1997", color:"#e85d04", birthday:"04-30", water:3.0, protein:160, height:180 },
-    bronwen:{ name:"Bronwen", pin:"2002", color:"#f72585", birthday:"04-25", water:2.5, protein:120, height:162 }
+    revan:  { name:"Revan",   pin:"1997", color:"#e85d04", birthday:"04-30", water:3.0, protein:160, height:180, weighMode:"daily" },
+    bronwen:{ name:"Bronwen", pin:"2002", color:"#f72585", birthday:"04-25", water:2.5, protein:120, height:162, weighMode:"daily" }
   };
   let accountRegistry = {};
   let PROFILES = {};
@@ -110,7 +110,8 @@
         birthday:a.birthday||null,
         water:parseFloat(a.water||2.5)||2.5,
         protein:parseInt(a.protein||120,10)||120,
-        height:parseFloat(a.height||175)||175
+        height:parseFloat(a.height||175)||175,
+        weighMode:(a.weighMode==="weekly"?"weekly":"daily")
       };
     });
     PROFILES = next;
@@ -252,6 +253,7 @@
       height,
       water,
       protein,
+      weighMode:"daily",
       birthday:null,
       createdAt:new Date().toISOString()
     };
@@ -364,6 +366,19 @@
   }
 
   function getTodayStr(){ return new Date().toISOString().split("T")[0]; }
+  function getWeekStartStr(dateStr){
+    const d=new Date(`${dateStr}T12:00:00`);
+    const dow=d.getDay();
+    const shift=dow===0?6:(dow-1); // Monday start
+    d.setDate(d.getDate()-shift);
+    return d.toISOString().split("T")[0];
+  }
+  function getWeighMode(profileKey=activeProfile){
+    return PROFILES?.[profileKey]?.weighMode==="weekly"?"weekly":"daily";
+  }
+  function getWeightEntryKey(profileKey,dateStr){
+    return getWeighMode(profileKey)==="weekly" ? getWeekStartStr(dateStr) : dateStr;
+  }
   function getMonthKey(){ return activeDate.slice(0,7); }
   function getTodayDayKey(){
     const dow=new Date().getDay();
@@ -440,9 +455,12 @@
 
     if(didMigrate){
       if(!merged.plan) merged.plan = seedPlan("revan");
+      merged.legacyMigrationCompleted = true;
       await setDoc(doc(db,"ironlog",SHARED_DOC), merged, {merge:true});
       toast("✅ Data migrated from old profiles");
+      return;
     }
+    await setDoc(doc(db,"ironlog",SHARED_DOC), { legacyMigrationCompleted:true }, {merge:true});
   }
 
   async function loadData(){
@@ -453,10 +471,10 @@
       const sharedSnap = await getDoc(sharedRef);
       const sharedData = sharedSnap.exists() ? sharedSnap.data() : null;
       const hasWorkouts = sharedData && Object.keys(sharedData.workouts||{}).length > 0;
+      const migrationDone = !!sharedData?.legacyMigrationCompleted;
 
-      // Migrate if: no shared doc at all, OR shared doc exists but has zero workouts
-      // (catches the case where data_shared was created empty by a previous buggy run)
-      if(!hasWorkouts){
+      // Only run legacy migration once. Otherwise old docs can re-populate deleted data.
+      if(!sharedSnap.exists() || (!migrationDone && !hasWorkouts)){
         toast("🔄 Loading your data...");
         await migrateOldData();
       }
@@ -528,8 +546,7 @@
 
   async function saveData(){
     try {
-      const ref = doc(db, "ironlog", SHARED_DOC);
-      await setDoc(ref, {
+      const payload = {
         profileData: {
           [activeProfile]: {
             plan:          WORKOUT_PLAN         || {},
@@ -543,9 +560,20 @@
             userOverrides: state.userOverrides || {}
           }
         },
+        legacyMigrationCompleted: true,
         // Backward-compat cleanup for legacy dotted-field writes
         [`profileData.${activeProfile}`]: null
-      }, { merge: true });
+      };
+      // Keep shared legacy fields in sync for Revan so fallback reads don't restore deleted days.
+      if(activeProfile==="revan"){
+        payload.plan = WORKOUT_PLAN || {};
+        payload.workouts = state.workouts || {};
+        payload.prs = state.prs || {};
+        payload.savedWorkouts = state.savedWorkouts || {};
+        payload.gymUrl = state.gymUrl || "";
+      }
+      const ref = doc(db, "ironlog", SHARED_DOC);
+      await setDoc(ref, payload, { merge: true });
     } catch(e){ toast("⚠️ Save failed"); }
   }
 
@@ -667,8 +695,52 @@
     if(!state.workouts[date]) state.workouts[date]={};
     if(!state.workouts[date][key]) state.workouts[date][key]={done:false,exercises:{},notes:""};
     if(!state.workouts[date][key].notes) state.workouts[date][key].notes="";
+    if(!state.workouts[date][key].workoutTime || typeof state.workouts[date][key].workoutTime!=="object") state.workouts[date][key].workoutTime={};
     return state.workouts[date][key];
   }
+  function getSessionElapsedMinutes(){
+    if(!sessionStart) return 0;
+    const ms=sessionPaused ? sessionPausedAt : (Date.now()-sessionStart);
+    return Math.max(0, Math.round(ms/60000));
+  }
+  function getWorkoutTimeEntry(date,key,participant){
+    const entry=state.workouts?.[date]?.[key]?.workoutTime?.[participant]||{};
+    return {
+      at: entry.at||"",
+      durationMins: Number(entry.durationMins||0) || 0,
+      trackedMins: Number(entry.trackedMins||0) || 0
+    };
+  }
+  function saveWorkoutTimeMetaLocal(date,key,participant,patch){
+    const wo=getWorkout(date,key);
+    if(!wo.workoutTime || typeof wo.workoutTime!=="object") wo.workoutTime={};
+    const cur=wo.workoutTime[participant]||{};
+    wo.workoutTime[participant]={...cur,...patch};
+  }
+  window.saveWorkoutTimeAt=async function(key,participant,val){
+    const cleaned=String(val||"").trim();
+    saveWorkoutTimeMetaLocal(activeDate,key,participant,{at:cleaned});
+    await saveData();
+    if(cleaned) toast(`🕒 ${PROFILES[participant]?.label||participant}: ${cleaned}`);
+  };
+  window.saveWorkoutDuration=async function(key,participant,val){
+    const mins=Math.max(0,parseInt(val||0,10)||0);
+    saveWorkoutTimeMetaLocal(activeDate,key,participant,{durationMins:mins});
+    await saveData();
+    if(mins>0) toast(`⏱ ${PROFILES[participant]?.label||participant}: ${mins} min`);
+  };
+  window.saveTrackedTime=async function(key,participant){
+    const mins=getSessionElapsedMinutes();
+    if(mins<=0){ toast("⚠️ Start timer first"); return; }
+    const now=new Date();
+    const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+    saveWorkoutTimeMetaLocal(activeDate,key,participant,{at:t,durationMins:mins,trackedMins:mins});
+    const sy=window.scrollY;
+    renderDayPanel(key);
+    window.scrollTo(0,sy);
+    await saveData();
+    toast(`⏱ Saved ${mins} min for ${PROFILES[participant]?.label||participant}`);
+  };
 
   // resolveExKey: handles both old format ("Exercise Name") and new format ("profile_Exercise Name")
   // Always returns the key that actually exists in the exercises object, preferring new format.
@@ -1248,7 +1320,7 @@
     const soreness=Math.max(0,Math.min(10,Math.round(Number(h.soreness||0))));
     const wp=Math.min(100,Math.round((h.water/adjustedWaterTarget)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
     const ac=PROFILES[activeProfile].color;
-    const bw=state.bodyweight?.[today]||0, h_m=(p.height||175)/100, bmi=bw>0?(bw/(h_m*h_m)).toFixed(1):0;
+    const bw=parseFloat(getPBW(activeProfile,today)||0), h_m=(p.height||175)/100, bmi=bw>0?(bw/(h_m*h_m)).toFixed(1):0;
     const bmiColor=bmi<18.5?'#5cba5c':bmi<25?'#f0c040':bmi<30?'#f97316':'#ef4444';
     const bmiStatus=bmi<18.5?'UNDERWEIGHT':bmi<25?'NORMAL':bmi<30?'OVERWEIGHT':'OBESE';
     el.innerHTML=`<div class="hg">
@@ -1613,7 +1685,7 @@
     participants.forEach(p=>{ day.exercises.forEach(ex=>{ const {data:_ed}=getExData(wo.exercises,p,ex.name); if(_ed?.checked)done++; }); });
     const pct=total>0?Math.round(done/total*100):0;
     const ton=calcSessionTonnage(activeDate,key);
-    const bw=state.bodyweight?.[isToday?getTodayStr():activeDate]||"";
+    const bw=getPBW(activeProfile,isToday?getTodayStr():activeDate)||"";
 
     let h=`<div class="ph" style="border-left:4px solid ${day.color}">
       <div class="phl">
@@ -1641,18 +1713,30 @@
     if(isSharedSession){
       participants.forEach(pp=>{
         const pbw=getPBW(pp,isToday?getTodayStr():activeDate);
+        const ptime=getWorkoutTimeEntry(activeDate,key,pp);
         const pcolor=PROFILES[pp]?.color||'#888';
-        h+=`<div class="pbwr">
+        h+=`<div class="pbwr" style="flex-wrap:wrap">
           <span class="pbwl" style="color:${pcolor}">${PROFILES[pp]?.label[0]||pp[0]}</span>
           <input type="number" class="pbwi" placeholder="—" step="0.1" min="30" max="300" value="${pbw}" ${!isEditable?'disabled':''} onblur="savePBW(this.value,'${pp}','${isToday?getTodayStr():activeDate}')" onkeydown="if(event.key==='Enter'){savePBW(this.value,'${pp}','${isToday?getTodayStr():activeDate}');this.blur()}">
           <span class="pbwu">kg</span>
+          <span class="pbwu">·</span>
+          <input type="time" class="pbwi" style="width:95px" value="${ptime.at||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutTimeAt('${key}','${pp}',this.value)" onkeydown="if(event.key==='Enter'){saveWorkoutTimeAt('${key}','${pp}',this.value);this.blur()}">
+          <input type="number" class="pbwi" style="width:72px" min="0" max="480" step="1" value="${ptime.durationMins||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutDuration('${key}','${pp}',this.value)" onkeydown="if(event.key==='Enter'){saveWorkoutDuration('${key}','${pp}',this.value);this.blur()}">
+          <span class="pbwu">min</span>
         </div>`;
       });
     } else {
+      const ptime=getWorkoutTimeEntry(activeDate,key,activeProfile);
       h+=`<div class="pbwr">
         <span class="pbwl">⚖️</span>
         <input type="number" class="pbwi" id="panel-bw-input" placeholder="—" step="0.1" min="30" max="300" value="${bw}" ${!isEditable?'disabled':''} onblur="saveBwDate(this.value,'${isToday?getTodayStr():activeDate}')" onkeydown="if(event.key==='Enter'){saveBwDate(this.value,'${isToday?getTodayStr():activeDate}');this.blur()}">
         <span class="pbwu">kg</span>
+      </div>`;
+      h+=`<div class="pbwr">
+        <span class="pbwl">🕒</span>
+        <input type="time" class="pbwi" style="width:95px" value="${ptime.at||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutTimeAt('${key}','${activeProfile}',this.value)" onkeydown="if(event.key==='Enter'){saveWorkoutTimeAt('${key}','${activeProfile}',this.value);this.blur()}">
+        <input type="number" class="pbwi" style="width:72px" min="0" max="480" step="1" value="${ptime.durationMins||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutDuration('${key}','${activeProfile}',this.value)" onkeydown="if(event.key==='Enter'){saveWorkoutDuration('${key}','${activeProfile}',this.value);this.blur()}">
+        <span class="pbwu">min</span>
       </div>`;
     }
 
@@ -1662,6 +1746,7 @@
         <span id="session-display" class="ptv">00:00</span>
         <button id="timer-play" class="tcb" onclick="startSessionTimer()" title="Start">▶</button>
         <button id="timer-pause" class="tcb" style="display:none" onclick="pauseSessionTimer()" title="Pause">⏸</button>
+        <button class="tcb" onclick="saveTrackedTime('${key}','${activeProfile}')" title="Save timer to my duration">💾</button>
         <button class="tcb" onclick="resetSessionTimer()" title="Reset">↺</button>
       </div>`;
     }
@@ -1797,36 +1882,37 @@
 
   // ── Per-participant bodyweight ──
   function getPBW(participant, date){
-    if(participant===activeProfile) return state.bodyweight?.[date]||"";
-    // For other participants, we store in shared doc under profileData
-    // We keep a local cache of other profiles' bw from the snapshot
-    return window._otherBW?.[participant]?.[date]||"";
+    const key=getWeightEntryKey(participant,date);
+    if(participant===activeProfile) return state.bodyweight?.[key]||"";
+    return state.allUserWorkouts?.[participant]?.bodyweight?.[key] || window._otherBW?.[participant]?.[key] || "";
   }
   window.savePBW=async function(val,participant,date){
     const w=parseFloat(val); if(!w||w<20||w>300)return;
+    const key=getWeightEntryKey(participant,date);
+    const weighMode=getWeighMode(participant);
     if(participant===activeProfile){
       if(!state.bodyweight)state.bodyweight={};
-      state.bodyweight[date]=w;
+      state.bodyweight[key]=w;
     } else {
       // Save via a dedicated key in firebase for that participant
       if(!window._otherBW) window._otherBW={};
       if(!window._otherBW[participant]) window._otherBW[participant]={};
-      window._otherBW[participant][date]=w;
+      window._otherBW[participant][key]=w;
       // Save directly to Firebase merge path
       try {
         await setDoc(doc(db,"ironlog",SHARED_DOC),{
           profileData:{
             [participant]:{
-              bodyweight:{[date]:w}
+              bodyweight:{[key]:w}
             }
           },
           [`profileData.${participant}`]: null
         },{merge:true});
-        toast(`⚖️ ${PROFILES[participant].label}: ${w}kg`);
+        toast(`⚖️ ${PROFILES[participant].label}: ${w}kg (${weighMode})`);
         return;
       } catch(e){}
     }
-    renderCharts(); await saveData(); toast(`⚖️ ${PROFILES[participant]?.label||participant}: ${w}kg`);
+    renderCharts(); await saveData(); toast(`⚖️ ${PROFILES[participant]?.label||participant}: ${w}kg (${weighMode})`);
   };
 
   function getExerciseAnimId(ex){
@@ -2061,6 +2147,12 @@
     if(snEl){ const wo=getWorkout(activeDate,key); wo.notes=snEl.value.trim(); }
     const wo=getWorkout(activeDate,key); wo.done=!wo.done;
     if(wo.done){
+      const trackedMins=getSessionElapsedMinutes();
+      if(trackedMins>0){
+        const now=new Date();
+        const t=`${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        saveWorkoutTimeMetaLocal(activeDate,key,activeProfile,{at:t,durationMins:trackedMins,trackedMins});
+      }
       resetSessionTimer();
       // Haptic feedback and confetti for completing workouts
       hapticFeedback([100, 50, 100]);
@@ -2072,8 +2164,10 @@
   window.saveBw=async function(val){ return saveBwDate(val, getTodayStr()); };
   window.saveBwDate=async function(val,date){
     const w=parseFloat(val); if(!w||w<20||w>300)return;
+    const key=getWeightEntryKey(activeProfile,date);
+    const weighMode=getWeighMode(activeProfile);
     if(!state.bodyweight)state.bodyweight={};
-    state.bodyweight[date]=w; renderCharts(); renderCalendar(); await saveData(); toast(`⚖️ ${w}kg logged`);
+    state.bodyweight[key]=w; renderCharts(); renderCalendar(); await saveData(); toast(`⚖️ ${w}kg logged (${weighMode})`);
   };
 
   // ─── HAPTIC FEEDBACK ───
@@ -2227,6 +2321,13 @@
     let h=`<div style="margin-bottom:16px;display:flex;gap:12px;flex-direction:column;padding-bottom:12px;border-bottom:1px solid var(--border)">
       <div><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">WORKOUT TITLE</label><input id="edit-title-input" type="text" value="${day.title}" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:'Barlow Condensed';font-size:1rem"></div>
       <div><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">SUBTITLE / MUSCLE GROUPS</label><input id="edit-subtitle-input" type="text" value="${day.subtitle}" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:0.9rem"></div>
+      <div><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">SCHEDULED WEEKDAY</label>
+        <select id="edit-weekday-input" class="fsel">
+          <option value="-1" ${day.weekday==null?'selected':''}>— No fixed day —</option>
+          <option value="1" ${day.weekday===1?'selected':''}>Monday</option><option value="2" ${day.weekday===2?'selected':''}>Tuesday</option><option value="3" ${day.weekday===3?'selected':''}>Wednesday</option>
+          <option value="4" ${day.weekday===4?'selected':''}>Thursday</option><option value="5" ${day.weekday===5?'selected':''}>Friday</option><option value="6" ${day.weekday===6?'selected':''}>Saturday</option><option value="0" ${day.weekday===0?'selected':''}>Sunday</option>
+        </select>
+      </div>
     </div><div id="eel">`;
     day.exercises.forEach((ex,i)=>{
       h+=`<div class="eer" data-index="${i}"><span class="eed">⠿</span><input class="een" list="exercise-options" value="${ex.name}" placeholder="Exercise name"><input class="ees" type="number" value="${ex.sets||''}" placeholder="Sets" min="0" max="10" style="width:52px"><span style="color:#555;font-size:.8rem">×</span><input class="eer2" value="${ex.reps}" placeholder="Reps" style="width:56px"><button class="emv" onclick="moveExercise(${i},-1)" title="Move up">▲</button><button class="emv" onclick="moveExercise(${i},1)" title="Move down">▼</button><button class="edb" onclick="this.closest('.eer').remove()">🗑</button></div>`;
@@ -2265,11 +2366,13 @@
     const newTitle=document.getElementById("edit-title-input").value.trim();
     const newSubtitle=document.getElementById("edit-subtitle-input").value.trim();
     const newNotes=document.getElementById("edit-notes-input").value.trim();
+    const newWeekday=parseInt(document.getElementById("edit-weekday-input")?.value??"-1",10);
     const hasBronwen=canManageWorkoutParticipants() ? !!document.getElementById("edit-participants-bronwen")?.checked : (WORKOUT_PLAN[key].participants||[]).includes("bronwen");
     if(!newTitle){toast("⚠️ Enter a title");return;}
     WORKOUT_PLAN[key].title=newTitle;
     WORKOUT_PLAN[key].subtitle=newSubtitle;
     WORKOUT_PLAN[key].notes=newNotes||"";
+    WORKOUT_PLAN[key].weekday=newWeekday>=0?newWeekday:null;
     if(canManageWorkoutParticipants()){
       WORKOUT_PLAN[key].participants=hasBronwen?['revan','bronwen']:['revan'];
     }
@@ -2314,7 +2417,7 @@
 
   window.deleteDay=async function(key){
     const day=WORKOUT_PLAN[key]; if(!day)return;
-    if(!confirm(`Delete "${day.title}" and all logged entries for this day?`))return;
+    if(!confirm(`Delete "${day.title}" from your plan and remove your logged entries for this day?`))return;
     Object.keys(state.workouts||{}).forEach(ds=>{
       if(!state.workouts?.[ds]?.[key]) return;
       delete state.workouts[ds][key];
@@ -2763,6 +2866,7 @@
           </div>
           <div><div class="auth-field-label">WATER TARGET (L)</div><input id="mgu-${pk}-water" class="fi" type="number" step="0.1" min="1" max="8" placeholder="e.g. 2.5" value="${p.water||''}"></div>
           <div><div class="auth-field-label">PROTEIN TARGET (G)</div><input id="mgu-${pk}-protein" class="fi" type="number" min="20" max="400" placeholder="e.g. 160" value="${p.protein||''}"></div>
+          <div><div class="auth-field-label">WEIGH-IN MODE</div><select id="mgu-${pk}-weigh-mode" class="fsel"><option value="daily" ${(p.weighMode||'daily')==='daily'?'selected':''}>DAILY</option><option value="weekly" ${(p.weighMode||'daily')==='weekly'?'selected':''}>WEEKLY</option></select></div>
         </div>
         <div style="display:flex;gap:6px;margin-top:7px">
           <button class="st-ab" onclick="saveUserOverridesFromEditor('${pk}')" style="margin:0">SAVE ${p.label}</button>
@@ -2815,13 +2919,15 @@
     const color=(document.getElementById(`mgu-${pk}-color`)?.value||"").trim();
     const water=parseFloat(document.getElementById(`mgu-${pk}-water`)?.value||0);
     const protein=parseFloat(document.getElementById(`mgu-${pk}-protein`)?.value||0);
+    const weighMode=((document.getElementById(`mgu-${pk}-weigh-mode`)?.value||"daily")==="weekly")?"weekly":"daily";
     const cur=state.userOverrides[pk]||{};
     state.userOverrides[pk]={
       ...cur,
       ...(height>0?{height}:{}),
       ...(color?{color}:{}),
       ...(water>0?{water}:{}),
-      ...(protein>0?{protein}:{})
+      ...(protein>0?{protein}:{}),
+      weighMode
     };
     applyUserOverrides(state.userOverrides);
     updateLogoColor();
