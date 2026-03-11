@@ -22,7 +22,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.30";
+  const APP_VERSION = "v1.0.31";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -3565,6 +3565,7 @@
     updateLogoColor(); updateClock(); setInterval(updateClock,1000);
     initSwipeGestures(); // Initialize swipe gestures for mobile
     initAuthGate();
+    initSectionStates();
   });
 </script>
 
@@ -3655,6 +3656,13 @@ html.light-mode .auth-msg{color:#b42318}
 .stat:hover{background:var(--bg4);transform:translateY(-1px);border-color:rgba(232,93,4,.35)}
 .sn{font-family:'Barlow Condensed',sans-serif;font-weight:900;font-size:1.35rem;letter-spacing:.06em}
 .sl{margin-top:2px;color:var(--muted);font-family:'Barlow Condensed',sans-serif;font-size:.74rem;letter-spacing:.1em;line-height:1.25}
+
+/* SECTIONS */
+.sec-toggle{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;background:var(--bg2);border:1px solid var(--border);cursor:pointer;margin:18px 0 0}
+.sec-toggle:hover{background:var(--bg3)}
+.sec-btn{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;font-size:.78rem;background:transparent;border:none;color:var(--muted);cursor:pointer}
+.sec-sub{font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.78rem;color:var(--muted)}
+.sec-content{margin-top:10px}
 
 /* MAIN */
 .main{max-width:1120px;margin:auto;padding:16px 20px}
@@ -4167,30 +4175,50 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   </div>
   <div id="weekly-summary" style="display:none"></div>
 
-  <div class="sec">// SELECT WORKOUT</div>
-  <div id="day-grid"></div>
-  <div id="rdb">
-    <span class="rbi">🛌</span>
-    <div><div class="rbt">REST DAY</div><div class="rbs">Recovery · Mobility · Walk</div></div>
+  <div class="sec-toggle" onclick="toggleSection('workout')">
+    <span class="sec-sub">YOUR PLAN</span>
+    <button id="btn-workout" class="sec-btn">▼ SELECT WORKOUT</button>
+  </div>
+  <div id="sec-workout-content" class="sec-content">
+    <div id="day-grid"></div>
+    <div id="rdb">
+      <span class="rbi">🛌</span>
+      <div><div class="rbt">REST DAY</div><div class="rbs">Recovery · Mobility · Walk</div></div>
+    </div>
   </div>
 
   <div id="day-panel" style="display:none"></div>
 
-  <div class="sec">// CALENDAR</div>
-  <div class="cal-nav">
-    <button onclick="prevMonth()">&#8592;</button>
-    <span id="month-label"></span>
-    <button onclick="nextMonth()">&#8594;</button>
+  <div class="sec-toggle" onclick="toggleSection('calendar')">
+    <span class="sec-sub">HISTORY</span>
+    <button id="btn-calendar" class="sec-btn">▼ CALENDAR</button>
   </div>
-  <div id="calendar"></div>
+  <div id="sec-calendar-content" class="sec-content">
+    <div class="cal-nav">
+      <button onclick="prevMonth()">&#8592;</button>
+      <span id="month-label"></span>
+      <button onclick="nextMonth()">&#8594;</button>
+    </div>
+    <div id="calendar"></div>
+  </div>
 
-  <div class="sec">// DAILY HEALTH</div>
-  <div id="health-checklist"></div>
+  <div class="sec-toggle" onclick="toggleSection('health')">
+    <span class="sec-sub">METRICS</span>
+    <button id="btn-health" class="sec-btn">▼ DAILY HEALTH</button>
+  </div>
+  <div id="sec-health-content" class="sec-content">
+    <div id="health-checklist"></div>
+  </div>
 
-  <div class="sec">// PERSONAL RECORDS</div>
-  <div id="pr-wall"></div>
+  <div class="sec-toggle" onclick="toggleSection('pr')">
+    <span class="sec-sub">RECORDS</span>
+    <button id="btn-pr" class="sec-btn">▼ PERSONAL RECORDS</button>
+  </div>
+  <div id="sec-pr-content" class="sec-content">
+    <div id="pr-wall"></div>
+  </div>
 
-  <div class="sec" style="margin-bottom:0">// DASHBOARD</div>
+  <div class="sec" style="margin-bottom:0;display:none">// DASHBOARD</div>
   <div class="db-toggle" onclick="toggleDashboard()">
     <span style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.78rem;color:var(--muted)">THIS MONTH · ACTIVITY</span>
     <button id="dbb">▼ DASHBOARD</button>
@@ -4208,8 +4236,13 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <div id="heatmap"></div>
   </div>
 
-  <div class="sec">// 1RM CALCULATOR</div>
-  <div id="orm-calc"></div>
+  <div class="sec-toggle" onclick="toggleSection('orm')">
+    <span class="sec-sub">TOOLS</span>
+    <button id="btn-orm" class="sec-btn">▼ 1RM CALCULATOR</button>
+  </div>
+  <div id="sec-orm-content" class="sec-content">
+    <div id="orm-calc"></div>
+  </div>
 
   <div class="nav-sec">
     <button class="nav-btn" onclick="navigateToGym()">🗺 NAVIGATE TO GYM</button>
