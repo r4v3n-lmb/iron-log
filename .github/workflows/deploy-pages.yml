@@ -26,12 +26,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare site files
-        run: |
-          mkdir -p site
-          cp ironlog.html site/ironlog.html
-          cp ironlog.html site/index.html
-          if [ -f iron_log_logo.png ]; then cp iron_log_logo.png site/iron_log_logo.png; fi
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build PWA site
+        run: npm run build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -39,7 +40,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: dist
 
       - name: Deploy to GitHub Pages
         id: deployment
