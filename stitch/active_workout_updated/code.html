@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Iron Log - Active Workout</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,700;0,900;1,700;1,900&amp;family=Inter:wght@400;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "inverse-surface": "#e5e2e1",
+                        "surface-container-high": "#2a2a2a",
+                        "on-secondary-container": "#b4b5b5",
+                        "tertiary-container": "#919090",
+                        "error-container": "#93000a",
+                        "surface-dim": "#131313",
+                        "surface-container": "#201f1f",
+                        "background": "#131313",
+                        "on-primary-container": "#4d1900",
+                        "on-tertiary": "#303031",
+                        "on-tertiary-fixed": "#1b1c1c",
+                        "on-surface-variant": "#e1bfb2",
+                        "surface": "#131313",
+                        "on-primary": "#581e00",
+                        "tertiary-fixed-dim": "#c7c6c6",
+                        "on-secondary-fixed-variant": "#454747",
+                        "surface-variant": "#353534",
+                        "tertiary-fixed": "#e4e2e2",
+                        "tertiary": "#c7c6c6",
+                        "surface-bright": "#3a3939",
+                        "inverse-on-surface": "#313030",
+                        "outline-variant": "#594137",
+                        "primary": "#ffb596",
+                        "on-secondary": "#2f3131",
+                        "inverse-primary": "#a33e00",
+                        "on-primary-fixed": "#360f00",
+                        "secondary-container": "#454747",
+                        "secondary-fixed-dim": "#c6c6c6",
+                        "on-secondary-fixed": "#1a1c1c",
+                        "on-surface": "#e5e2e1",
+                        "on-tertiary-fixed-variant": "#464747",
+                        "primary-fixed": "#ffdbcd",
+                        "surface-tint": "#ffb596",
+                        "on-primary-fixed-variant": "#7c2e00",
+                        "secondary": "#c6c6c6",
+                        "error": "#ffb4ab",
+                        "on-background": "#e5e2e1",
+                        "outline": "#a98a7e",
+                        "primary-container": "#f26411",
+                        "secondary-fixed": "#e2e2e2",
+                        "surface-container-highest": "#353534",
+                        "surface-container-lowest": "#0e0e0e",
+                        "on-tertiary-container": "#292a2a",
+                        "on-error": "#690005",
+                        "primary-fixed-dim": "#ffb596",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-low": "#1c1b1b"
+                    },
+                    fontFamily: {
+                        "headline": ["Barlow Condensed", "sans-serif"],
+                        "body": ["Inter", "sans-serif"],
+                        "label": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .bg-kinetic-gradient {
+            background: linear-gradient(135deg, #ffb596 0%, #f26411 100%);
+        }
+        .barlow { font-family: 'Barlow Condensed', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body selection:bg-primary selection:text-on-primary-container min-h-screen pb-32">
+<!-- TopAppBar (Shared Component) -->
+<header class="fixed top-0 w-full z-50 bg-neutral-900/80 backdrop-blur-xl shadow-2xl shadow-black/50">
+<div class="flex justify-between items-center px-6 py-4 w-full">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-orange-600 dark:text-orange-500 text-2xl" data-icon="fitness_center">fitness_center</span>
+<h1 class="text-2xl font-black italic text-orange-600 dark:text-orange-500 tracking-widest font-headline uppercase tracking-tighter">IRON LOG</h1>
+</div>
+<button class="text-neutral-400 hover:opacity-80 transition-opacity active:scale-95 duration-150">
+<span class="material-symbols-outlined text-2xl" data-icon="notifications">notifications</span>
+</button>
+</div>
+</header>
+<main class="pt-24 px-6 space-y-6 max-w-lg mx-auto">
+<!-- Active Workout Header -->
+<section class="flex justify-between items-end">
+<div>
+<p class="text-primary-container font-bold text-[10px] uppercase tracking-[0.2em] mb-1">Push Day A • Chest &amp; Triceps</p>
+<h2 class="font-headline text-5xl font-black italic leading-none uppercase tracking-tighter">Bench Press</h2>
+</div>
+<div class="text-right flex flex-col items-end">
+<span class="text-on-secondary-container text-[10px] uppercase font-bold tracking-widest block">Rest Timer</span>
+<span class="font-headline text-3xl font-black italic text-primary-container">01:45</span>
+</div>
+</section>
+<!-- Current Exercise Visual/Data -->
+<div class="relative overflow-hidden rounded-xl h-56 group">
+<img alt="Workout demonstration" class="w-full h-full object-cover grayscale opacity-50 group-hover:scale-105 transition-transform duration-700" data-alt="Intense close-up of a weightlifter performing bench press in a dark, gritty industrial gym with moody overhead lighting and dramatic shadows" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCuYnXknddr1NF07a18kYm84pX4hNlAQEXXJ1gFE60awG4wCSe1AhIzhOg-frWiIJ5i5UZ6uIBu28DvuUWSxYsWGrueCN7z-Dnhvo95iw9sMHNxxSMd4RT5bux_HY6JCoC-WjBPK43ey6tO9xsiuMguSvBoX6BplxEtAiLUhMAjaMJJ22d3ZWPub3oDFFSwyE-I1k4hNYsRehaknafMp5YT1FIyGb1xOCi-SEwBJB7OMTJ-yYlQ96rGTSmPZf3joT-Ny1bfUbY0kTs"/>
+<div class="absolute inset-0 bg-gradient-to-t from-background via-background/20 to-transparent"></div>
+<div class="absolute bottom-4 left-4 right-4 flex gap-3">
+<div class="flex-1 bg-surface-container/90 backdrop-blur-md px-4 py-3 rounded-xl border border-outline-variant/20">
+<p class="text-[9px] uppercase font-black text-on-secondary-container tracking-widest">Previous Best</p>
+<p class="font-headline text-2xl font-black italic">225 <span class="text-xs font-normal not-italic text-on-secondary-container">LBS</span></p>
+</div>
+<div class="flex-1 bg-surface-container/90 backdrop-blur-md px-4 py-3 rounded-xl border border-outline-variant/20">
+<p class="text-[9px] uppercase font-black text-on-secondary-container tracking-widest">Target Reps</p>
+<p class="font-headline text-2xl font-black italic">8-12</p>
+</div>
+</div>
+</div>
+<!-- Logging Interface -->
+<div class="grid grid-cols-2 gap-4">
+<!-- Weight Input -->
+<div class="bg-surface-container-high p-5 rounded-2xl space-y-3 shadow-xl border border-outline-variant/10">
+<label class="text-[10px] uppercase font-bold text-on-secondary-container tracking-widest">Weight (lbs)</label>
+<div class="flex items-center justify-between">
+<button class="w-12 h-12 rounded-full bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-center active:scale-90 transition-transform hover:bg-surface-container-highest">
+<span class="material-symbols-outlined" data-icon="remove">remove</span>
+</button>
+<span class="font-headline text-5xl font-black italic text-on-background">185</span>
+<button class="w-12 h-12 rounded-full bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-center active:scale-90 transition-transform hover:bg-surface-container-highest">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+</button>
+</div>
+</div>
+<!-- Reps Input -->
+<div class="bg-surface-container-high p-5 rounded-2xl space-y-3 shadow-xl border border-outline-variant/10">
+<label class="text-[10px] uppercase font-bold text-on-secondary-container tracking-widest">Reps</label>
+<div class="flex items-center justify-between">
+<button class="w-12 h-12 rounded-full bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-center active:scale-90 transition-transform hover:bg-surface-container-highest">
+<span class="material-symbols-outlined" data-icon="remove">remove</span>
+</button>
+<span class="font-headline text-5xl font-black italic text-on-background">10</span>
+<button class="w-12 h-12 rounded-full bg-surface-container-lowest border border-outline-variant/20 flex items-center justify-center active:scale-90 transition-transform hover:bg-surface-container-highest">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Main Action -->
+<button class="w-full bg-kinetic-gradient text-on-primary-container font-bold py-6 rounded-2xl text-lg uppercase tracking-[0.2em] flex items-center justify-center gap-3 shadow-2xl shadow-primary-container/30 active:scale-[0.98] transition-all duration-150 ring-2 ring-primary/20">
+<span class="material-symbols-outlined font-black" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+            Log Set 2 of 4
+        </button>
+<!-- Set History -->
+<div class="space-y-4 pt-2">
+<div class="flex items-center justify-between px-1">
+<h3 class="font-headline text-2xl font-bold uppercase italic tracking-tight">Set History</h3>
+<span class="text-[10px] text-primary-container uppercase font-black tracking-widest">Volume: 3,700 lbs</span>
+</div>
+<div class="space-y-3">
+<!-- Completed Set -->
+<div class="bg-surface-container-low/50 border border-outline-variant/10 p-4 rounded-xl flex items-center justify-between opacity-50 grayscale transition-all hover:opacity-100 hover:grayscale-0">
+<div class="flex items-center gap-5">
+<span class="font-headline text-3xl font-black italic text-on-secondary-container">01</span>
+<div>
+<p class="font-bold text-sm tracking-tight">185 lbs × 12 reps</p>
+<p class="text-[9px] uppercase text-on-secondary-container font-black tracking-widest">Completed • RPE 8</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-primary-container text-2xl" data-icon="check_circle" style="font-variation-settings: 'FILL' 1;">check_circle</span>
+</div>
+<!-- Active Set Placeholder -->
+<div class="bg-surface-container-high border-2 border-primary-container/30 p-4 rounded-xl flex items-center justify-between shadow-xl relative overflow-hidden">
+<div class="absolute inset-y-0 left-0 w-1 bg-primary-container"></div>
+<div class="flex items-center gap-5">
+<span class="font-headline text-3xl font-black italic text-primary-container">02</span>
+<div>
+<p class="font-bold text-sm tracking-tight text-primary-container">Current Set</p>
+<p class="text-[9px] uppercase text-primary font-black tracking-widest animate-pulse">Working...</p>
+</div>
+</div>
+<div class="flex gap-1.5">
+<div class="w-2 h-2 rounded-full bg-primary-container animate-ping"></div>
+<div class="w-2 h-2 rounded-full bg-primary-container"></div>
+</div>
+</div>
+</div>
+</div>
+<!-- Next Exercise Preview -->
+<div class="bg-surface-container-high p-5 rounded-2xl flex items-center justify-between group cursor-pointer border border-outline-variant/10 hover:border-primary-container/30 transition-all shadow-lg active:scale-[0.98]">
+<div class="flex items-center gap-4">
+<div class="w-14 h-14 rounded-xl bg-surface-container-lowest flex items-center justify-center border border-outline-variant/10 group-hover:bg-primary-container/10 transition-colors">
+<span class="material-symbols-outlined text-on-secondary-container group-hover:text-primary-container transition-colors text-2xl" data-icon="keyboard_double_arrow_right">keyboard_double_arrow_right</span>
+</div>
+<div>
+<p class="text-[9px] uppercase font-black text-on-secondary-container tracking-[0.2em]">Next Exercise</p>
+<p class="font-headline text-xl font-bold italic uppercase tracking-tight text-on-surface">Incline Dumbbell Flyes</p>
+</div>
+</div>
+<span class="text-[10px] font-black uppercase text-primary-container bg-primary-container/10 px-3 py-1.5 rounded-lg border border-primary-container/20">3 Sets</span>
+</div>
+</main>
+<!-- BottomNavBar (Shared Component) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 bg-neutral-900/90 backdrop-blur-2xl rounded-t-[1.5rem] shadow-[0_-8px_30px_rgb(0,0,0,0.5)]">
+<div class="fixed bottom-0 left-0 w-full flex justify-around items-center pt-3 pb-6 px-4">
+<div class="flex flex-col items-center justify-center text-neutral-500 hover:text-neutral-200 transition-colors active:scale-90 duration-200">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-['Inter'] text-[10px] font-bold uppercase tracking-[0.05em] mt-1">Dashboard</span>
+</div>
+<div class="flex flex-col items-center justify-center text-orange-500 scale-110 transition-transform active:scale-90 duration-200">
+<span class="material-symbols-outlined" data-icon="fitness_center" style="font-variation-settings: 'FILL' 1;">fitness_center</span>
+<span class="font-['Inter'] text-[10px] font-bold uppercase tracking-[0.05em] mt-1">Workouts</span>
+</div>
+<div class="flex flex-col items-center justify-center text-neutral-500 hover:text-neutral-200 transition-colors active:scale-90 duration-200">
+<span class="material-symbols-outlined" data-icon="insights">insights</span>
+<span class="font-['Inter'] text-[10px] font-bold uppercase tracking-[0.05em] mt-1">Progress</span>
+</div>
+<div class="flex flex-col items-center justify-center text-neutral-500 hover:text-neutral-200 transition-colors active:scale-90 duration-200">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-['Inter'] text-[10px] font-bold uppercase tracking-[0.05em] mt-1">Profile</span>
+</div>
+</div>
+</nav>
+</body></html>
