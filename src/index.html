@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>IRON LOG</title>
+<link rel="icon" type="image/png" href="iron_log_logo.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="./css/styles.css">
+  <script type="module" src="./js/app.js"></script>
+
+
+</head>
+<body>
+<div id="app-splash">
+  <div class="app-splash-card">
+    <img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">
+    <div class="app-splash-title">IRON <span>LOG</span></div>
+    <div class="app-splash-copy">Preparing your training app shell...</div>
+  </div>
+</div>
+<div id="offline-banner">Offline mode: cached app shell loaded. Firebase sync will resume when your connection returns.</div>
+
+<div id="auth-gate">
+  <div class="auth-card">
+    <div id="auth-home" class="auth-home">
+      <div class="auth-kicker">WELCOME BACK, CHAMPION</div>
+      <div class="auth-home-copy">
+        <div class="auth-title"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON <span class="auth-log">LOG</span></span></div>
+        <div class="auth-home-title">READY TO <span class="accent-word">CRUSH</span> IT?</div>
+        <div class="auth-sub">Sign in to continue training with your own profile, metrics, and daily recovery tracking.</div>
+      </div>
+      <div class="auth-actions">
+        <button class="st-ab" onclick="showAuthMode('signin')">SIGN IN</button>
+        <button class="st-ab" onclick="showAuthMode('signup')">SIGN UP</button>
+      </div>
+    </div>
+    <div id="auth-grid" class="auth-grid" style="display:none">
+      <div id="auth-signin-pane" class="auth-pane" style="display:none">
+        <div class="auth-h">SIGN IN</div>
+        <div class="auth-select-label">SELECT PROFILE</div>
+        <select id="auth-user-select" class="fsel"></select>
+        <input id="auth-pin" class="fi" type="password" inputmode="numeric" placeholder="PIN">
+        <button class="st-ab" onclick="signInAccount()">SIGN IN</button>
+        <button class="st-ab auth-back" onclick="showAuthMode('home')">BACK</button>
+      </div>
+      <div id="auth-signup-pane" class="auth-pane" style="display:none">
+        <div class="auth-h">SIGN UP</div>
+        <input id="signup-name" class="fi" placeholder="Name">
+        <input id="signup-pin" class="fi" type="password" inputmode="numeric" placeholder="PIN">
+        <input id="signup-height" class="fi" type="number" min="120" max="230" placeholder="Height (cm)">
+        <input id="signup-color" type="hidden" value="#4361ee">
+        <div class="auth-field-label">THEME COLOUR</div>
+        <div id="signup-color-swatches" class="color-swatches"></div>
+        <input id="signup-water" class="fi" type="number" step="0.1" min="1" max="8" placeholder="Water target L (optional)">
+        <input id="signup-protein" class="fi" type="number" min="20" max="400" placeholder="Protein target g (optional)">
+        <button class="st-ab" onclick="signUpAccount()">CREATE ACCOUNT</button>
+        <button class="st-ab auth-back" onclick="showAuthMode('home')">BACK</button>
+      </div>
+    </div>
+    <div class="auth-meta">
+      <div id="auth-msg" class="auth-msg"></div>
+      <div class="auth-ver">VERSION <span id="auth-version">v0.0.0</span></div>
+    </div>
+  </div>
+</div>
+
+<div id="admin-page">
+  <div class="adm-head">
+    <div class="adm-title-main"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON <span class="logo-log">LOG</span></span> · ADMIN DATA</div>
+    <div class="adm-actions">
+      <button class="st-ab" style="width:auto;margin:0" onclick="refreshAdminDataTables()">REFRESH</button>
+      <button class="st-ab" style="width:auto;margin:0" onclick="exportAdminDataPack()">EXPORT PACK</button>
+      <button class="st-ab" style="width:auto;margin:0" onclick="closeAdminDataPage()">CLOSE</button>
+    </div>
+  </div>
+  <div class="adm-wrap" id="admin-table-root"></div>
+</div>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="logo"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON<span class="logo-log">LOG</span></span></div>
+  <div class="hdr-right">
+    <div id="header-datetime"></div>
+  </div>
+</div>
+<div id="coverWorkoutPlayer">
+  <div class="cover-topbar">
+    <div class="cover-workout-name" id="coverWorkoutName">WORKOUT</div>
+    <div class="cover-progress" id="coverProgress">1 / 1</div>
+  </div>
+  <div class="cover-swipe-container safe-top" id="coverSwipeContainer">
+    <div class="cover-swipe-track" id="coverSwipeTrack"></div>
+  </div>
+  <div class="cover-dots" id="coverDots"></div>
+  <div class="cover-input-area">
+    <div class="cover-input-group">
+      <button class="cover-stepper-btn" ontouchstart="adjustWeight(-2.5)" onclick="adjustWeight(-2.5)">−</button>
+      <div class="cover-input-display">
+        <span class="cover-input-value" id="coverWeight">20</span>
+        <span class="cover-input-unit">kg</span>
+      </div>
+      <button class="cover-stepper-btn" ontouchstart="adjustWeight(2.5)" onclick="adjustWeight(2.5)">+</button>
+    </div>
+    <div class="cover-input-group">
+      <button class="cover-stepper-btn" ontouchstart="adjustReps(-1)" onclick="adjustReps(-1)">−</button>
+      <div class="cover-input-display">
+        <span class="cover-input-value" id="coverReps">8</span>
+        <span class="cover-input-unit">reps</span>
+      </div>
+      <button class="cover-stepper-btn" ontouchstart="adjustReps(1)" onclick="adjustReps(1)">+</button>
+    </div>
+  </div>
+  <button class="cover-log-btn" id="coverLogBtn" ontouchstart="logCurrentSet()" onclick="logCurrentSet()">✓ LOG SET</button>
+  <div class="cover-sets-logged" id="coverSetsLogged"></div>
+  <div class="cover-bottombar safe-bottom">
+    <button class="cover-nav-btn" ontouchstart="coverPrevExercise()" onclick="coverPrevExercise()">‹ PREV</button>
+    <button class="cover-finish-btn" ontouchstart="openCoverFinish()" onclick="openCoverFinish()">FINISH</button>
+    <button class="cover-nav-btn" ontouchstart="coverNextExercise()" onclick="coverNextExercise()">NEXT ›</button>
+  </div>
+</div>
+<div id="notif-panel">
+  <div class="noti-head">NOTIFICATIONS</div>
+  <div id="notif-list"></div>
+</div>
+
+<div id="mainApp">
+<div class="main">
+  <div id="mobile-home-section" class="mobile-section">
+    <section class="dash-hero">
+      <img class="dash-hero-image" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAWk59FjtWTePj3H0riY9nt90Pl8jzQ2UfACl_hjfIzTPSmwL8HI1gCMO0wSMgkrbtt_Fy0ODHlgMzm869m0Rrg9irb4L0714oqaqvCiPcPpBKXvBwcZWLwHfi7QeT6VTgC3eVHiUTeqVXhCNzn4DVQU02mql0TJbu12aLve2ZvBvHt-DHrNdqJCehx5JqbLHPLRmnsx4DO6A_eTw0f_0z9QCQxEsBoda0_Gi64QP04E1XAwiPVxWIRG3TVHcl5Vts5fqQYW3YsuL8" alt="Gym hero">
+      <div class="dash-hero-copy">
+        <p class="dash-kicker">WELCOME BACK, CHAMPION</p>
+        <h2 id="dashboard-greeting" class="dash-title">Ready to crush it?</h2>
+      </div>
+      <div class="dash-hero-glow"></div>
+    </section>
+
+    <section id="dashboard-consistency" class="dashboard-card"></section>
+
+    <section class="dashboard-metric-grid">
+      <button class="stat" onclick="focusStat('days')" title="Jump to calendar"><div class="stat-icon material-symbols-outlined">calendar_month</div><div class="sn" id="dashboard-workouts">00</div><div class="sl">WORKOUTS / MONTH</div></button>
+      <button class="stat" onclick="focusStat('tonnage')" title="Open progress"><div class="stat-icon material-symbols-outlined">speed</div><div class="sn" id="stat-tonnage">0</div><div class="sl">TOTAL KG MOVED</div></button>
+    </section>
+    <div id="stat-days" style="display:none">0</div>
+    <div id="stat-ex" style="display:none">0</div>
+    <div id="stat-consistency" style="display:none">0</div>
+
+    <section class="qbar">
+      <button class="dashboard-primary-cta" onclick="openTodayWorkout()"><span class="material-symbols-outlined">add</span><span>Start Workout</span></button>
+      <button id="install-app-btn" class="dashboard-secondary-cta" style="display:none" onclick="installPwaApp()">Install App</button>
+    </section>
+
+    <section class="dashboard-feed">
+      <div class="dashboard-section-head">
+        <h3>Recent Activity</h3>
+        <button onclick="navTo('progress')">See All</button>
+      </div>
+      <div id="dashboard-activity-list"></div>
+    </section>
+  </div>
+
+  <div id="mobile-workouts-section" class="mobile-section">
+    <section class="screen-head">
+      <div>
+        <span class="screen-kicker">TRAINING DEPOT</span>
+        <h2 class="screen-title">WORKOUTS</h2>
+      </div>
+      <div class="screen-count">
+        <span class="screen-count-value" id="workout-count-label">00</span>
+        <span class="screen-count-label">ROUTINES</span>
+      </div>
+    </section>
+
+    <div class="workout-toolbar">
+      <label class="workout-search">
+        <span class="material-symbols-outlined">search</span>
+        <input type="text" placeholder="Find a routine..." oninput="setWorkoutSearch(this.value)">
+      </label>
+      <button class="workout-filter" onclick="openAddWorkoutQuick()"><span class="material-symbols-outlined">tune</span></button>
+    </div>
+
+    <div id="weekly-summary" style="display:none"></div>
+
+    <div id="day-grid"></div>
+    <div id="rdb">
+      <span class="rbi">🛌</span>
+      <div><div class="rbt">REST DAY</div><div class="rbs">Recovery · Mobility · Walk</div></div>
+    </div>
+    <section class="workout-tip-card">
+      <img class="workout-tip-image" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBO7JDA_LCjEZ5XwzZbvgU74lM3b0RAeBbjTkKESQbQ_1lPPse6NNb4bLKzpYeDG5xBio8RBJ0f2OcGPoRKltT5eNUHCrlCa0f4BHyzIoSUgh_7e2DkXYYNJkUySm9PzzWEXsU1Qgz97yK2_eneGvsEtuMim1uyhe03WsB8QS8Z-z14gJMXxFEzLYjimykfp18JYxUmeHG7T-RgmujwE3NrlyV2DNzdxKuOH6SEIwdrrlnxNmR7BwFutotN_rsXJB9f8AlUWpEa4kQ" alt="Weight plates">
+      <div class="workout-tip-copy">
+        <span>PRO TIP</span>
+        <strong>MASTER PROGRESSIVE OVERLOAD</strong>
+        <p>Track every rep. Small gains today lead to tectonic shifts tomorrow.</p>
+      </div>
+      <button class="workout-tip-fab" onclick="openAddWorkoutQuick()"><span class="material-symbols-outlined">add</span></button>
+    </section>
+    <div id="day-panel" style="display:none"></div>
+  </div>
+
+  <div id="mobile-progress-section" class="mobile-section">
+    <section class="screen-head progress-head">
+      <div>
+        <span class="screen-kicker">PERFORMANCE OVERVIEW</span>
+        <h2 class="screen-title">PROGRESS</h2>
+      </div>
+      <div class="screen-count">
+        <span class="screen-count-label">CURRENT STREAK</span>
+        <span class="screen-count-value" id="progress-streak">0 DAYS</span>
+      </div>
+    </section>
+
+    <section class="progress-top-grid">
+      <div class="progress-feature-card">
+        <div class="dashboard-card-head">
+          <h3>Volume Over Time</h3>
+          <span class="material-symbols-outlined">insights</span>
+        </div>
+        <div class="progress-feature-metric" id="progress-volume-label">Monthly trend</div>
+        <canvas id="tonnageChart"></canvas>
+      </div>
+      <div class="progress-stat-card">
+        <span class="material-symbols-outlined">calendar_today</span>
+        <strong id="progress-frequency">0.0</strong>
+        <em>AVG WORKOUTS / WK</em>
+      </div>
+      <div class="progress-stat-card">
+        <span class="material-symbols-outlined">workspace_premium</span>
+        <strong id="progress-pr-count">0</strong>
+        <em>PERSONAL RECORDS</em>
+      </div>
+    </section>
+
+    <section class="dashboard-feed">
+      <div class="dashboard-section-head">
+        <h3>Workout History</h3>
+      </div>
+      <div id="progress-activity-list"></div>
+    </section>
+
+    <section class="progress-cards">
+      <div class="progress-card"><div class="chart-title">WEEKLY FREQUENCY</div><canvas id="freqChart"></canvas></div>
+      <div class="progress-card"><div class="chart-title">SESSION BREAKDOWN</div><canvas id="volChart"></canvas></div>
+      <div class="progress-card"><div class="chart-title">VOLUME BY MUSCLE</div><canvas id="muscleVolChart"></canvas></div>
+      <div class="progress-card"><div class="chart-title">BODYWEIGHT TREND (kg)</div><canvas id="bwChart"></canvas></div>
+      <div class="progress-card"><div class="chart-title">SLEEP TREND (hrs)</div><canvas id="sleepChart"></canvas></div>
+      <div id="month-comparison" class="progress-card progress-card-copy"></div>
+    </section>
+
+    <section class="progress-section-block">
+      <div class="dashboard-section-head">
+        <h3>Personal Records</h3>
+      </div>
+      <div id="pr-wall"></div>
+    </section>
+
+    <section class="progress-section-block">
+      <div class="dashboard-section-head">
+        <h3>Calendar</h3>
+      </div>
+      <div class="cal-nav">
+        <button onclick="prevMonth()">&#8592;</button>
+        <span id="month-label"></span>
+        <button onclick="nextMonth()">&#8594;</button>
+      </div>
+      <div id="calendar"></div>
+    </section>
+
+    <section class="progress-section-block">
+      <div class="dashboard-section-head">
+        <h3>1RM Estimator</h3>
+      </div>
+      <div id="orm-calc"></div>
+    </section>
+
+    <section class="progress-section-block">
+      <div class="dashboard-section-head">
+        <h3>Gym</h3>
+      </div>
+      <div class="nav-sec">
+        <button class="nav-btn" onclick="navigateToGym()">🗺 NAVIGATE TO GYM</button>
+        <button class="nav-rst" onclick="resetGymUrl()">CLEAR SAVED GYM URL</button>
+      </div>
+      <div id="heatmap"></div>
+    </section>
+
+    <section class="progress-section-block visual-progress-block">
+      <div class="dashboard-section-head">
+        <h3>Visual Progress</h3>
+      </div>
+      <div id="visual-progress-root"></div>
+    </section>
+  </div>
+
+  <div id="mobile-profile-section" class="mobile-section">
+    <section class="screen-head progress-head">
+      <div>
+        <span class="screen-kicker">DAILY INPUTS</span>
+        <h2 class="screen-title">PROFILE</h2>
+      </div>
+      <div class="screen-count">
+        <span class="screen-count-label">ACTIVE USER</span>
+        <span class="screen-count-value" id="profile-active-user">USER</span>
+      </div>
+    </section>
+    <div id="profile-root" class="profile-shell"></div>
+  </div>
+</div>
+</div>
+<input id="profile-avatar-input" type="file" accept="image/*" style="display:none" onchange="handleProfileAvatarUpload(event)">
+<input id="visual-progress-input" type="file" accept="image/*" multiple style="display:none" onchange="handleVisualProgressUpload(event)">
+
+<!-- SETTINGS -->
+<div id="sto"></div>
+<div id="stp">
+  <div class="sth">
+    <span class="sttl">⚙ SETTINGS</span>
+    <button class="stcb" onclick="closeSettings()">×</button>
+  </div>
+  <div class="sts" data-sec="user">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('user')"><span>// USER</span><span class="st-arrow" id="st-arrow-user">▾</span></div>
+    <div class="st-body">
+      <div id="stprofs"></div>
+    </div>
+  </div>
+  <div class="sts" data-sec="data">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('data')"><span>// DATA</span><span class="st-arrow" id="st-arrow-data">▾</span></div>
+    <div class="st-body">
+      <button class="st-ab" onclick="pushUpdatesNow()" style="color:#60a5fa;border-color:rgba(96,165,250,.35)">☁ PUSH UPDATES NOW</button>
+      <button class="st-ab" onclick="cleanupDuplicatePRs()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">🧹 CLEAN DUPLICATE PRS</button>
+      <button class="st-ab" onclick="exportCSV()">📥 EXPORT CSV</button>
+      <label class="st-ab" style="cursor:pointer">📤 IMPORT CSV<input type="file" id="cii" accept=".csv" style="display:none"></label>
+    </div>
+  </div>
+  <div class="sts" data-sec="management">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('management')"><span>// MANAGEMENT</span><span class="st-arrow" id="st-arrow-management">▾</span></div>
+    <div class="st-body">
+      <div id="mg-tabs" class="th-btns"></div>
+      <div id="mg-body" style="margin-top:8px"></div>
+    </div>
+  </div>
+  <div class="sts" data-sec="admin" id="admin-settings-block" style="display:none">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('admin')"><span>// ADMIN</span><span class="st-arrow" id="st-arrow-admin">▾</span></div>
+    <div class="st-body">
+      <button class="st-ab" onclick="openAdminDataPage()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">📊 OPEN ADMIN DATA TABLES</button>
+    </div>
+  </div>
+  <div class="sts" data-sec="debug">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('debug')"><span>// DEBUG</span><span class="st-arrow" id="st-arrow-debug">▾</span></div>
+    <div class="st-body">
+      <button class="st-ab" onclick="debugFirebase()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">🔍 CHECK FIREBASE DOCS</button>
+      <button class="st-ab" onclick="forceMigrate()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⚡ FORCE RE-MIGRATE DATA</button>
+      <div style="font-size:.7rem;color:var(--muted);margin-top:4px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em">Open browser console (F12) to see results</div>
+    </div>
+  </div>
+  <div class="sts" data-sec="templates">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('templates')"><span>// WORKOUT TEMPLATES</span><span class="st-arrow" id="st-arrow-templates">▾</span></div>
+    <div class="st-body">
+      <div style="display:flex;gap:5px;margin-bottom:8px">
+        <input type="text" id="template-input" placeholder="Template name..." style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 9px;font-family:'Barlow Condensed',sans-serif;outline:none" onkeydown="if(event.key==='Enter')saveTemplate(this.value)">
+        <button class="st-ab" style="width:auto;margin:0;background:rgba(92,186,92,.1);border-color:rgba(92,186,92,.3);color:#5cba5c" onclick="saveTemplate(document.getElementById('template-input').value)">SAVE</button>
+      </div>
+      <div id="template-list" style="font-size:.75rem"></div>
+    </div>
+  </div>
+  <div class="sts" data-sec="theme">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('theme')"><span>// THEME</span><span class="st-arrow" id="st-arrow-theme">▾</span></div>
+    <div class="st-body">
+      <div class="th-btns">
+        <button class="th-btn" onclick="setTheme('dark')">🌙 DARK</button>
+        <button class="th-btn" onclick="setTheme('light')">☀️ LIGHT</button>
+      </div>
+    </div>
+  </div>
+  <div class="sts" data-sec="version">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('version')"><span>// VERSION</span><span class="st-arrow" id="st-arrow-version">▾</span></div>
+    <div class="st-body">
+      <div class="version-row">CURRENT <span id="app-version">v0.0.0</span></div>
+      <div class="version-row">LATEST <span id="latest-app-version">v0.0.0</span></div>
+      <div id="app-update-status" style="margin-top:8px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.76rem;color:var(--muted)">UP TO DATE</div>
+      <input id="app-update-url-input" class="fi" placeholder="Latest app URL (hosted ironlog.html)" style="margin-top:8px">
+      <button class="st-ab" onclick="saveAppUpdateUrl()">💾 SAVE UPDATE URL</button>
+      <button class="st-ab" onclick="checkForAppUpdate()">🔎 CHECK FOR UPDATE</button>
+      <button class="st-ab" onclick="updateAppNow()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⬆ UPDATE THIS DEVICE</button>
+      <button class="st-ab" onclick="publishCurrentVersion()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">📢 PUBLISH THIS VERSION</button>
+    </div>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div id="em">
+  <div class="mbox">
+    <div class="mhd">
+      <span id="emit" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em">EDIT WORKOUT</span>
+      <button class="mcb" onclick="closeEdit()">×</button>
+    </div>
+    <div id="emb"></div>
+    <div class="mft">
+      <button class="mcc" onclick="closeEdit()">CANCEL</button>
+      <button class="msc" onclick="saveEdit()">SAVE CHANGES</button>
+    </div>
+  </div>
+</div>
+
+<!-- SAVE WORKOUT MODAL -->
+<div id="svm">
+  <div class="mbox mbox-sm">
+    <div class="mhd">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;color:var(--accent)">💾 SAVE WORKOUT</span>
+      <button class="mcb" onclick="closeSave()">×</button>
+    </div>
+    <div id="svmb" class="mbd"></div>
+    <div class="mft"><button class="mcc" onclick="closeSave()">CANCEL</button></div>
+  </div>
+</div>
+
+<!-- ADD DAY MODAL -->
+<div id="adm">
+  <div class="mbox mbox-sm">
+    <div class="mhd">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;color:var(--accent)">+ ADD WORKOUT DAY</span>
+      <button class="mcb" onclick="closeAddDay()">×</button>
+    </div>
+    <div class="mbd" style="display:flex;flex-direction:column;gap:11px">
+      <div><div class="fl">START FROM SAVED WORKOUT (optional)</div>
+        <select id="adtemplate" class="fsel" onchange="applyAddTemplateSelection(this.value)">
+          <option value="">— START BLANK —</option>
+        </select>
+      </div>
+      <div><div class="fl">DAY NAME *</div><input id="adi" class="fi" placeholder="e.g. PUSH, FULL BODY"></div>
+      <div><div class="fl">SUBTITLE / MUSCLES</div><input id="adsi" class="fi" placeholder="e.g. Chest · Shoulders"></div>
+      <div><div class="fl">SCHEDULED WEEKDAY (optional)</div>
+        <select id="adws" class="fsel">
+          <option value="-1">— No fixed day —</option>
+          <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+          <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+        </select>
+      </div>
+      <div><div class="fl">COLOUR</div><div id="adcp" style="display:flex;gap:7px;flex-wrap:wrap"></div></div>
+    </div>
+    <div class="mft">
+      <button class="mcc" onclick="closeAddDay()">CANCEL</button>
+      <button class="msc" onclick="confirmAddDay()">CREATE DAY</button>
+    </div>
+  </div>
+</div>
+
+<!-- SWAP MODAL -->
+<div id="swm">
+  <div class="mbox mbox-sm">
+    <div class="mhd">
+      <span id="swt" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em"></span>
+      <button class="mcb" onclick="closeSwap()">×</button>
+    </div>
+    <div class="mbd" style="display:flex;flex-direction:column;gap:9px">
+      <input id="swn" class="fi" placeholder="New exercise name (or choose from suggestions below)">
+      <div id="swsuggestions" class="sw-suggestions-container"></div>
+      <div style="display:flex;gap:7px;align-items:center">
+        <input id="sws" type="hidden" value="3">
+        <div id="swap-stepper-root" style="min-width:148px"></div>
+        <span style="color:var(--muted);font-size:.82rem">×</span>
+        <input id="swr" class="fi" placeholder="Reps" style="width:68px">
+        <span style="color:var(--muted);font-size:.82rem">reps</span>
+      </div>
+    </div>
+    <div class="mft">
+      <button class="mcc" onclick="closeSwap()">CANCEL</button>
+      <button class="msc" onclick="confirmSwap()">CONFIRM SWAP</button>
+    </div>
+  </div>
+</div>
+
+<!-- QUICK FINISH MODAL -->
+<div id="qfm">
+  <div class="mbox mbox-sm">
+    <div class="mhd">
+      <span style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;color:var(--accent)">✅ QUICK FINISH</span>
+      <button class="mcb" onclick="closeQuickFinish()">×</button>
+    </div>
+    <div class="mbd" style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div class="fl">SESSION RPE (1-10)</div>
+        <input id="qfm-rpe" class="fi" type="number" min="1" max="10" step="0.5" placeholder="e.g. 8.5">
+        <div class="rpe-tiles" style="margin-top:8px">
+          <button class="rpe-tile" data-value="6" ontouchstart="selectRPE(this, 6)" onclick="selectRPE(this, 6)">6</button>
+          <button class="rpe-tile" data-value="7" ontouchstart="selectRPE(this, 7)" onclick="selectRPE(this, 7)">7</button>
+          <button class="rpe-tile" data-value="8" ontouchstart="selectRPE(this, 8)" onclick="selectRPE(this, 8)">8</button>
+          <button class="rpe-tile" data-value="9" ontouchstart="selectRPE(this, 9)" onclick="selectRPE(this, 9)">9</button>
+          <button class="rpe-tile" data-value="10" ontouchstart="selectRPE(this, 10)" onclick="selectRPE(this, 10)">10</button>
+        </div>
+      </div>
+      <div>
+        <div class="fl">PAIN FLAG</div>
+        <select id="qfm-pain-level" class="fsel">
+          <option value="none">None</option>
+          <option value="mild">Mild</option>
+          <option value="moderate">Moderate</option>
+          <option value="severe">Severe</option>
+        </select>
+        <div class="pain-options" style="margin-top:8px">
+          <button class="pain-pill" data-value="none" ontouchstart="selectPain(this, 'none')" onclick="selectPain(this, 'none')">None</button>
+          <button class="pain-pill" data-value="mild" ontouchstart="selectPain(this, 'mild')" onclick="selectPain(this, 'mild')">Mild</button>
+          <button class="pain-pill" data-value="moderate" ontouchstart="selectPain(this, 'moderate')" onclick="selectPain(this, 'moderate')">Moderate</button>
+          <button class="pain-pill" data-value="severe" ontouchstart="selectPain(this, 'severe')" onclick="selectPain(this, 'severe')">Severe</button>
+        </div>
+      </div>
+      <div>
+        <div class="fl">PAIN AREA (optional)</div>
+        <input id="qfm-pain-area" class="fi" placeholder="e.g. left shoulder">
+      </div>
+      <div>
+        <div class="fl">FINISH NOTE (optional)</div>
+        <textarea id="qfm-note" class="fi" style="min-height:78px;resize:vertical" placeholder="How did this session feel?"></textarea>
+      </div>
+    </div>
+    <div class="mft">
+      <button class="mcc" onclick="closeQuickFinish()">CANCEL</button>
+      <button class="msc" onclick="confirmQuickFinish()">SAVE & COMPLETE</button>
+    </div>
+  </div>
+</div>
+
+<!-- EXERCISE HISTORY MODAL -->
+<div id="exercise-history-modal">
+  <div class="mbox mbox-lg">
+    <div class="mhd">
+      <span id="exercise-history-title" style="font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em"></span>
+      <button class="mcb" onclick="closeExerciseHistory()">×</button>
+    </div>
+    <div class="mbd" style="padding:20px">
+      <div style="height:300px;width:100%">
+        <canvas id="exercise-history-chart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<datalist id="exercise-options"></datalist>
+<div id="confetti-container"></div>
+<div id="toast"></div>
+<nav class="bottom-nav" id="bottomNav" role="navigation" aria-label="Main navigation">
+  <button class="bnav-item active" data-section="dashboard" ontouchstart="navTo('dashboard', this)" onclick="navTo('dashboard', this)">
+    <span class="bnav-icon material-symbols-outlined">dashboard</span>
+    <span class="bnav-label">Dashboard</span>
+  </button>
+  <button class="bnav-item" data-section="workouts" ontouchstart="navTo('workouts', this)" onclick="navTo('workouts', this)">
+    <span class="bnav-icon material-symbols-outlined">fitness_center</span>
+    <span class="bnav-label">Workouts</span>
+  </button>
+  <button class="bnav-item" data-section="progress" ontouchstart="navTo('progress', this)" onclick="navTo('progress', this)">
+    <span class="bnav-icon material-symbols-outlined">insights</span>
+    <span class="bnav-label">Progress</span>
+  </button>
+  <button class="bnav-item" data-section="profile" ontouchstart="navTo('profile', this)" onclick="navTo('profile', this)">
+    <span class="bnav-icon material-symbols-outlined">person</span>
+    <span class="bnav-label">Profile</span>
+  </button>
+  <button class="bnav-item" data-section="settings" ontouchstart="navTo('settings', this)" onclick="navTo('settings', this)">
+    <span class="bnav-icon material-symbols-outlined">settings</span>
+    <span class="bnav-label">Settings</span>
+  </button>
+</nav>
+</body>
+</html>

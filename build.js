@@ -1,43 +1,36 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from "fs";
+import path from "path";
+const rootDir = process.cwd();
+const srcDir = path.join(rootDir, "src");
+const distDir = path.join(rootDir, "dist");
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const copyTargets = [
+  { from: path.join(srcDir, "index.html"), to: path.join(distDir, "index.html") },
+  { from: path.join(srcDir, "index.html"), to: path.join(distDir, "ironlog.html") },
+  { from: path.join(srcDir, "manifest.json"), to: path.join(distDir, "manifest.json") },
+  { from: path.join(srcDir, "service-worker.js"), to: path.join(distDir, "service-worker.js") },
+  { from: path.join(srcDir, "css"), to: path.join(distDir, "css") },
+  { from: path.join(srcDir, "js"), to: path.join(distDir, "js") },
+  { from: path.join(srcDir, "icons"), to: path.join(distDir, "icons") },
+  { from: path.join(rootDir, "iron_log_logo.png"), to: path.join(distDir, "iron_log_logo.png") },
+];
 
-// Paths
-const srcDir = path.join(__dirname, 'src');
-const distDir = path.join(__dirname, 'dist');
-const htmlFile = path.join(srcDir, 'index.html');
-const cssFile = path.join(srcDir, 'css', 'styles.css');
-const jsFile = path.join(srcDir, 'js', 'app.js');
-const firebaseFile = path.join(srcDir, 'js', 'firebase.js');
-const outputFile = path.join(distDir, 'ironlog.html');
-
-// Ensure dist directory exists
-if (!fs.existsSync(distDir)) {
-  fs.mkdirSync(distDir, { recursive: true });
+function ensureDir(dir) {
+  fs.mkdirSync(dir, { recursive: true });
 }
 
-// Read files
-let html = fs.readFileSync(htmlFile, 'utf8');
-let css = fs.readFileSync(cssFile, 'utf8');
-let firebaseCode = fs.readFileSync(firebaseFile, 'utf8');
-let appCode = fs.readFileSync(jsFile, 'utf8');
+function copyPath(from, to) {
+  if (!fs.existsSync(from)) {
+    throw new Error(`Missing source: ${from}`);
+  }
+  ensureDir(path.dirname(to));
+  fs.cpSync(from, to, { recursive: true, force: true });
+}
 
-// Remove module imports from app.js and firebase code since we'll inline it
-firebaseCode = firebaseCode
-  .replace(/export\s+{[\s\S]*?};?/, '') // Remove export statements
-  .replace(/export\s+const\s+/g, 'const ');
+function build() {
+  ensureDir(distDir);
+  copyTargets.forEach(({ from, to }) => copyPath(from, to));
+  console.log(`✓ Built deployable PWA bundle to ${distDir}`);
+}
 
-appCode = appCode
-  .replace(/import\s+{[\s\S]*?}\s+from\s+["']\.\/firebase\.js["'];?/g, ''); // Remove firebase import
-
-// Transform HTML
-html = html
-  .replace(/<link rel="stylesheet" href="css\/styles.css">/, `<style>\n${css}\n</style>`)
-  .replace(/<script type="module" src="js\/app.js"><\/script>/, `<script type="module">\n${firebaseCode}\n${appCode}\n</script>`);
-
-// Write bundled file
-fs.writeFileSync(outputFile, html, 'utf8');
-
-console.log(`✓ Bundled to ${outputFile} (${(fs.statSync(outputFile).size / 1024).toFixed(1)} KB)`);
+build();
