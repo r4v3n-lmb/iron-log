@@ -1026,7 +1026,7 @@
 
   window.navTo=function(section, btn){
     if(section === "settings"){
-      setMobileSection("dashboard");
+      setMobileSection("profile");
       openSettings();
       return;
     }
@@ -1037,7 +1037,8 @@
     const map = {
       dashboard: "mobile-home-section",
       workouts: "mobile-workouts-section",
-      progress: "mobile-progress-section"
+      progress: "mobile-progress-section",
+      profile: "mobile-profile-section"
     };
     const target = document.getElementById(map[section] || "");
     if(target) target.scrollIntoView({ behavior:"smooth", block:"start" });
@@ -1619,7 +1620,7 @@
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions(); renderNotifications(); renderDashboardShell();
+    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions(); renderNotifications(); renderDashboardShell(); renderProfileShell();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -1668,13 +1669,15 @@
     });
   }
 
-  function getRecentDashboardSessions(limit=5){
+  function getRecentDashboardSessions(limit=3){
     const items = [];
     Object.keys(state.workouts || {}).forEach(ds=>{
       Object.keys(state.workouts[ds] || {}).forEach(key=>{
         const wo = state.workouts[ds][key];
         const day = WORKOUT_PLAN[key];
-        if(!day || !sessionHasLoggedActivity(wo)) return;
+        const hasExercises = !!Object.keys(wo?.exercises || {}).length;
+        const hasSessionMeta = !!(wo?.sessionMeta?.startAt || wo?.sessionMeta?.rpe || wo?.sessionMeta?.durationMins);
+        if(!day || (!sessionHasLoggedActivity(wo) && !wo?.done && !hasExercises && !hasSessionMeta)) return;
         const checkedCount = Object.values(wo.exercises || {}).filter(entry=>entry?.checked).length;
         items.push({
           date: ds,
@@ -1730,12 +1733,20 @@
     const activityEl = document.getElementById("dashboard-activity-list");
     const progressActivityEl = document.getElementById("progress-activity-list");
     const streakEl = document.getElementById("progress-streak");
+    const profileUserEl = document.getElementById("profile-active-user");
+    const profileWaterEl = document.getElementById("profile-water-target");
+    const profileProteinEl = document.getElementById("profile-protein-target");
+    const profileHeightEl = document.getElementById("profile-height-target");
     const profile = accountRegistry[activeProfile]?.name || PROFILES[activeProfile]?.label || activeProfile;
     if(greetingEl) greetingEl.innerHTML = `READY TO <span class="accent-word">CRUSH</span> IT?`;
     if(subEl) subEl.textContent = activeDay && WORKOUT_PLAN[activeDay]
       ? `${WORKOUT_PLAN[activeDay].title} is live`
       : `${String(profile).toUpperCase()} IS LOCKED IN`;
     if(streakEl) streakEl.textContent = `${getCurrentStreakDays()} DAYS`;
+    if(profileUserEl) profileUserEl.textContent = String(profile).toUpperCase();
+    if(profileWaterEl) profileWaterEl.textContent = String(PROFILES[activeProfile]?.water || 0);
+    if(profileProteinEl) profileProteinEl.textContent = String(PROFILES[activeProfile]?.protein || 0);
+    if(profileHeightEl) profileHeightEl.textContent = String(PROFILES[activeProfile]?.height || 0);
 
     if(consistencyEl){
       const today = new Date(getTodayStr()+"T12:00:00");
@@ -1763,7 +1774,7 @@
           ${days.map(day=>`
             <div class="consistency-day ${day.level > 0 ? "done" : ""} ${day.isToday ? "today" : ""}">
               <div class="consistency-track">
-                <div class="consistency-fill" style="height:${Math.max(day.level * 100, day.level > 0 ? 28 : 0)}%"></div>
+                <div class="consistency-fill" style="height:${day.level > 0 ? Math.max(Math.round(day.level * 48), 8) : 0}px;opacity:${day.level > 0 ? Math.max(day.level, .18) : 0}"></div>
               </div>
               <span>${day.label}</span>
             </div>
@@ -1773,9 +1784,9 @@
     }
 
     const activityMarkup = ()=>{
-      const sessions = getRecentDashboardSessions(5);
+      const sessions = getRecentDashboardSessions(3);
       if(!sessions.length){
-        return `<div class="activity-empty">No completed sessions yet. Start today&apos;s workout to build your feed.</div>`;
+        return `<div class="activity-empty">No workouts logged yet. Start a session and your last 3 workouts will show here.</div>`;
       }
       return sessions.map(item=>{
         const icon = item.day.title?.includes("CARDIO") ? "sprint" : "fitness_center";
@@ -2008,6 +2019,89 @@
       <div class="hi bmi-card"><div class="hl">⚖️ BMI</div><div class="hc"><span class="bmi-value" style="color:${bmiColor}">${bmi}</span></div><div class="bmi-status" style="color:${bmiColor}">${bmiStatus}</div></div>
     </div>`;
   }
+  function renderProfileShell(){
+    const el=document.getElementById("profile-root"); if(!el) return;
+    const today=getTodayStr();
+    const p=PROFILES[activeProfile]||{};
+    const h=ensureHealthEntry(today);
+    const profileName=accountRegistry[activeProfile]?.name || activeProfile;
+    const bw=parseFloat(getPBW(activeProfile,today)||0);
+    const adjustedWaterTarget = getAdjustedWaterTarget(activeProfile, today);
+    const proteinTarget=p.protein||120;
+    const waterGlasses=Math.max(0,Math.round((h.water/0.25)));
+    const waterTargetGlasses=Math.max(1,Math.round((adjustedWaterTarget/0.25)));
+    const proteinPct=Math.min(100,Math.round(((h.protein||0)/proteinTarget)*100));
+    const sleepHours=Math.floor(Number(h.sleep||0));
+    const sleepMins=Math.round((Number(h.sleep||0)-sleepHours)*60);
+    el.innerHTML=`
+      <section class="profile-hero">
+        <div class="profile-avatar"><img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAq14oMwfSCnwBlXk3jrf7FxHlEGkdGCJ7_YDaVjG3m90MvqbBNMy49zmc1M1xGjqaO13UXDzihsmsZu0ao_kZ06bBAVcs1SK_XqldIqHNvXcv-kefl6nNY8swPpqwVyT7KpNCjpv8CJWf0fEBQdKfro9nJugvF2YWMwdJ4w3iiq90kn3HGlzfGCc8RjV41-uUt_vbH_MLBTmXonvj5AZUJ3F6CGyROmdBZlx-ELMRMejZp4qHssKfX9g4UHE6VriWa6WEzpnbFciI" alt="Profile"></div>
+        <div class="profile-hero-copy">
+          <h3>${String(profileName).toUpperCase()}</h3>
+          <div class="profile-hero-meta"><span class="material-symbols-outlined">verified</span><span>ELITE MEMBER</span></div>
+        </div>
+        <div class="profile-pro-badge">PRO</div>
+      </section>
+      <section class="profile-metric-card">
+        <div class="profile-metric-head">
+          <div>
+            <span class="profile-label">BODY WEIGHT</span>
+            <div class="profile-weight-row"><strong>${bw>0?bw.toFixed(1):"--"}</strong><em>KG</em></div>
+          </div>
+          <div class="profile-spark"><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+        <button class="profile-primary-btn" onclick="logTodayWeightPrompt()">LOG TODAY'S WEIGHT</button>
+      </section>
+      <section class="profile-section">
+        <h3>DAILY OPTIMIZATION</h3>
+        <div class="profile-habit-card">
+          <div class="profile-habit-icon water"><span class="material-symbols-outlined">water_drop</span></div>
+          <div class="profile-habit-copy"><strong>Water Intake</strong><span>${waterGlasses} / ${waterTargetGlasses} GLASSES</span></div>
+          <div class="profile-habit-actions"><button onclick="adjHealth('water',-0.25)">−</button><button class="plus" onclick="adjHealth('water',0.25)">+</button></div>
+        </div>
+        <div class="profile-habit-card nutrition">
+          <div class="profile-habit-main">
+            <div class="profile-habit-icon nutrition"><span class="material-symbols-outlined">restaurant</span></div>
+            <div class="profile-habit-copy"><strong>Nutrition</strong><span>TARGET: ${proteinTarget} G PROTEIN</span></div>
+          </div>
+          <div class="profile-nutrition-side"><strong>${h.protein||0}</strong><span>CURRENT</span></div>
+          <div class="profile-progress-bar"><div class="profile-progress-fill" style="width:${proteinPct}%"></div></div>
+        </div>
+        <div class="profile-two-col">
+          <div class="profile-mini-card">
+            <div class="profile-habit-icon creatine"><span class="material-symbols-outlined">medication</span></div>
+            <div><strong>Creatine</strong><span>DAILY DOSE</span></div>
+            <button class="profile-toggle ${h.creatine?'active':''}" onclick="togHealth('creatine')">${h.creatine?'TAKEN':'MARK TAKEN'}</button>
+          </div>
+          <div class="profile-mini-card">
+            <div class="profile-habit-icon sleep"><span class="material-symbols-outlined">bedtime</span></div>
+            <div><strong>Sleep</strong><span>${sleepHours} H ${String(sleepMins).padStart(2,'0')} M</span></div>
+            <button class="profile-sleep-btn" onclick="logSleepPrompt()">LOG SLEEP</button>
+          </div>
+        </div>
+      </section>
+      <section class="profile-links-card">
+        <button onclick="openSettings()"><span class="material-symbols-outlined">settings</span><span>ACCOUNT SETTINGS</span><span class="material-symbols-outlined chev">chevron_right</span></button>
+        <button onclick="openSettings()"><span class="material-symbols-outlined">card_membership</span><span>SUBSCRIPTION</span><span class="material-symbols-outlined chev">chevron_right</span></button>
+        <button onclick="openSettings()"><span class="material-symbols-outlined">help_center</span><span>SUPPORT</span><span class="material-symbols-outlined chev">chevron_right</span></button>
+      </section>
+      <button class="profile-signout" onclick="signOutAccount()">SIGN OUT OF IRON LOG</button>
+    `;
+  }
+  window.logTodayWeightPrompt=async function(){
+    const current=getPBW(activeProfile,getTodayStr())||"";
+    const next=prompt("Log today's bodyweight (kg)", current);
+    if(next===null) return;
+    await saveBwDate(next,getTodayStr());
+    renderProfileShell();
+  };
+  window.logSleepPrompt=async function(){
+    const current=ensureHealthEntry(getTodayStr()).sleep || "";
+    const next=prompt("Log sleep hours (e.g. 7.5)", current);
+    if(next===null) return;
+    await setHealthValue('sleep', next);
+    renderProfileShell();
+  };
   function ensureHealthEntry(dateStr){
     if(!state.health || typeof state.health !== "object" || Array.isArray(state.health)) state.health = {};
     const v = state.health[dateStr];
@@ -2397,7 +2491,7 @@
       <div class="active-panel-meta"><span>${formatDate(activeDate)}</span>${ton>0?`<span>${ton}kg moved</span>`:""}${!isEditable?`<span>VIEW ONLY</span>${isPastDate?'<button class="active-secondary-inline" onclick="unlockActiveDate()">Unlock</button>':''}`:""}</div>
       ${participantCards}
       ${nextExercise ? `<button class="active-workout-next" onclick="document.getElementById('queue-item-${nextExercise.index}')?.scrollIntoView({behavior:'smooth',block:'center'})"><div><span>Next Exercise</span><strong>${nextExercise.ex.name}</strong></div><em>${nextExercise.ex.sets || 0} sets</em></button>` : ""}
-      <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Paused or not started: reorder enabled':'Pause to reorder next exercises'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${item.ex.sets || 0} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)">↑</button><button ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)">↓</button></div>`:""}</div>`).join("")}</div></section>
+      <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Paused or not started: reorder enabled':'Pause to reorder next exercises'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${item.ex.sets || 0} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div></section>
       <section class="active-session-note"><label>Session Note</label><textarea id="snote-${key}" class="active-note-input" ${!isEditable?'disabled':''} placeholder="How did this session feel?">${sessionNote}</textarea>${isEditable?`<button class="active-secondary-btn" onclick="saveSessionNote('${key}')">Save Note</button>`:""}</section>
     </section>`;
     panel.style.display="block";
@@ -5111,7 +5205,8 @@ body[data-cover-player="active"] .hdr{display:none}
 .mobile-section{display:none}
 body[data-mobile-section="dashboard"] #mobile-home-section,
 body[data-mobile-section="workouts"] #mobile-workouts-section,
-body[data-mobile-section="progress"] #mobile-progress-section{display:block}
+body[data-mobile-section="progress"] #mobile-progress-section,
+body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .hdr{padding:16px 20px;background:rgba(19,19,19,.78);border-bottom:none;backdrop-filter:blur(22px);box-shadow:0 18px 36px rgba(0,0,0,.3)}
 .hdr-center{display:none}
 .hdr-right{gap:8px}
@@ -5135,12 +5230,12 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
 .dashboard-card-head span:last-child,.dashboard-section-head button{color:var(--accent);font-weight:800;background:none;border:none}
 .dashboard-card-head-tight h3{font-size:1.28rem;letter-spacing:.01em}
 .dashboard-card-head-tight span{font-family:'Barlow Condensed',sans-serif;font-size:1.45rem;font-style:italic}
-.consistency-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:12px;margin-top:18px}
+.consistency-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-top:18px}
 .stitch-consistency-bars{align-items:end}
 .consistency-day{display:flex;flex-direction:column;align-items:center;gap:8px}
-.consistency-track{width:100%;height:56px;border-radius:999px;background:#0f0f0f;position:relative;overflow:hidden}
-.consistency-fill{position:absolute;inset:auto 0 0 0;height:0;background:linear-gradient(180deg,var(--accent-soft),var(--accent));border-radius:inherit}
-.consistency-day.done .consistency-fill{min-height:14px}
+.consistency-track{width:100%;height:48px;border-radius:999px;background:#111;position:relative;overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding:0 1px}
+.consistency-fill{width:100%;height:0;background:linear-gradient(180deg,var(--accent-soft),var(--accent));border-radius:999px;transition:height .22s ease,opacity .22s ease;align-self:flex-end}
+.consistency-day.done .consistency-fill{min-height:8px}
 .consistency-day.today span{color:var(--accent-soft)}
 .consistency-day span{font-size:.62rem;font-weight:800;color:#7d7d7d;text-transform:uppercase}
 .sbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
@@ -5148,18 +5243,19 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
 .stat-icon{font-size:1.35rem;color:var(--accent)}
 .sn{font-family:'Barlow Condensed',sans-serif;font-size:2.45rem;line-height:.9;font-style:italic;font-weight:900}
 .sl{font-size:.64rem;font-weight:800;color:var(--muted);letter-spacing:.16em;text-transform:uppercase}
-.qbar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.dashboard-metric-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.qbar{display:grid;grid-template-columns:1fr;gap:14px;margin-top:18px}
 .dashboard-primary-cta,.dashboard-secondary-cta{min-height:64px;border:none;border-radius:20px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
 .dashboard-primary-cta{grid-column:1/-1;display:flex;align-items:center;justify-content:center;gap:10px;background:linear-gradient(135deg,var(--accent-soft),var(--accent));color:#230d03;box-shadow:0 18px 34px rgba(242,100,17,.24)}
 .dashboard-secondary-cta{background:rgba(255,255,255,.06);color:var(--text)}
 .dashboard-feed,.progress-section-block{margin-top:16px;padding:22px}
 #dashboard-activity-list,#progress-activity-list{display:grid;gap:12px;margin-top:16px}
-.activity-card{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;padding:14px 16px;border:none;border-radius:14px;background:#2a2a2a;color:var(--text);text-align:left}
-.activity-icon{width:42px;height:42px;border-radius:10px;display:grid;place-items:center;background:rgba(255,255,255,.05);color:var(--accent);font-size:1.1rem}
+.activity-card{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;padding:14px 16px;border:none;border-radius:14px;background:#232323;color:var(--text);text-align:left}
+.activity-icon{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;background:#2f2f2f;color:var(--accent);font-size:1.1rem}
 .activity-copy{display:flex;flex-direction:column;gap:4px}
 .activity-title{font-weight:700;font-size:.92rem}
 .activity-meta{font-size:.72rem;color:var(--muted);letter-spacing:.01em;text-transform:none}
-.activity-tag{font-size:.68rem;font-weight:800;color:var(--accent);text-transform:none;letter-spacing:.01em}
+.activity-tag{font-size:.68rem;font-weight:800;color:var(--accent);text-transform:none;letter-spacing:.01em;text-align:right}
 .activity-empty{padding:16px;border-radius:18px;background:rgba(255,255,255,.04);color:var(--muted)}
 .screen-head{padding:24px;display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
 .screen-count{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
@@ -5248,7 +5344,7 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
 .active-workout-stats-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .active-secondary-btn{min-height:42px;padding:0 14px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.1em;text-transform:uppercase}
 .active-timer-actions{display:flex;gap:8px;margin-top:8px}
-.active-timer-btn{min-height:40px;padding:0 14px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.active-timer-btn{min-height:40px;padding:0 14px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.1em;text-transform:uppercase;display:inline-flex;align-items:center;justify-content:center;text-align:center}
 .active-timer-btn.end{background:rgba(242,100,17,.18);color:var(--accent-soft)}
 .active-queue-shell,.active-session-note{padding:18px;border-radius:22px;background:rgba(255,255,255,.04)}
 .active-queue-list{display:grid;gap:10px}
@@ -5258,7 +5354,71 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
 .active-queue-copy strong{display:block;font-weight:700}
 .active-queue-copy span{font-size:.72rem;color:var(--muted)}
 .active-queue-actions{display:flex;gap:6px}
-.active-queue-actions button{width:36px;height:36px;border:none;border-radius:12px;background:rgba(255,255,255,.08);color:var(--text)}
+.active-queue-actions button{min-width:42px;height:42px;border:none;border-radius:12px;background:rgba(255,255,255,.08);color:var(--text);display:inline-flex;align-items:center;justify-content:center;transition:transform .18s ease, background .18s ease}
+.active-queue-actions button:hover{transform:translateY(-1px);background:rgba(255,255,255,.14)}
+.profile-shell{display:grid;gap:16px}
+.profile-grid{display:grid;gap:14px}
+.profile-card{padding:22px;border-radius:18px;background:linear-gradient(180deg,rgba(53,53,52,.92),rgba(42,42,42,.92))}
+.profile-card h3{font-family:'Barlow Condensed',sans-serif;font-size:1.45rem;font-style:italic;text-transform:uppercase;margin-bottom:14px}
+.profile-actions{display:flex;gap:10px;flex-wrap:wrap}
+.profile-pill{padding:9px 12px;border-radius:999px;background:rgba(255,255,255,.06);font-size:.68rem;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.profile-shell{grid-template-columns:1fr;gap:18px}
+.profile-hero,.profile-metric-card,.profile-section,.profile-links-card{border:none;border-radius:26px;background:linear-gradient(180deg,#3a3a39 0%,#2d2d2c 100%);box-shadow:none}
+.profile-hero{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:16px;padding:22px 24px}
+.profile-avatar{width:72px;height:72px;border-radius:50%;overflow:hidden;box-shadow:0 10px 22px rgba(0,0,0,.25);background:#202020}
+.profile-avatar img{width:100%;height:100%;object-fit:cover;filter:grayscale(1)}
+.profile-hero-copy h3{font-family:'Barlow Condensed',sans-serif;font-size:2.1rem;line-height:.92;font-style:italic;font-weight:900;letter-spacing:-.03em;text-transform:uppercase}
+.profile-hero-meta{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.06);font-size:.62rem;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.profile-hero-meta .material-symbols-outlined{font-size:1rem;color:var(--accent-soft)}
+.profile-pro-badge{min-width:62px;height:62px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent-soft),var(--accent));color:#2a1207;font-family:'Barlow Condensed',sans-serif;font-size:1.15rem;font-style:italic;font-weight:900;letter-spacing:.08em}
+.profile-metric-card{padding:22px 24px}
+.profile-metric-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.profile-label{display:block;font-size:.66rem;font-weight:800;letter-spacing:.2em;color:var(--muted);text-transform:uppercase}
+.profile-weight-row{display:flex;align-items:flex-end;gap:8px;margin-top:12px}
+.profile-weight-row strong{font-family:'Barlow Condensed',sans-serif;font-size:4rem;line-height:.86;font-style:italic;font-weight:900;color:#fff}
+.profile-weight-row em{padding-bottom:8px;font-style:normal;font-size:.72rem;font-weight:800;letter-spacing:.18em;color:var(--accent-soft);text-transform:uppercase}
+.profile-spark{display:flex;align-items:flex-end;gap:6px;height:58px;padding-top:10px}
+.profile-spark span{width:10px;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.22))}
+.profile-spark span:nth-child(1){height:22px}
+.profile-spark span:nth-child(2){height:34px}
+.profile-spark span:nth-child(3){height:48px;background:linear-gradient(180deg,var(--accent-soft),var(--accent))}
+.profile-spark span:nth-child(4){height:28px}
+.profile-spark span:nth-child(5){height:18px}
+.profile-primary-btn,.profile-sleep-btn,.profile-signout{width:100%;min-height:58px;border:none;border-radius:18px;font-family:'Barlow Condensed',sans-serif;font-size:.98rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}
+.profile-primary-btn{margin-top:18px;background:linear-gradient(135deg,var(--accent-soft),var(--accent));color:#2d1206;box-shadow:0 18px 34px rgba(242,100,17,.22)}
+.profile-section{padding:24px}
+.profile-section h3{font-family:'Barlow Condensed',sans-serif;font-size:1.6rem;font-style:italic;font-weight:900;letter-spacing:-.02em;text-transform:uppercase}
+.profile-habit-card{position:relative;display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:18px;margin-top:16px;border-radius:22px;background:#262626}
+.profile-habit-main{display:flex;align-items:center;gap:14px}
+.profile-habit-icon{width:54px;height:54px;border-radius:18px;display:grid;place-items:center;background:rgba(255,255,255,.05);color:#fff}
+.profile-habit-icon .material-symbols-outlined{font-size:1.5rem}
+.profile-habit-icon.water{background:rgba(73,163,255,.14);color:#9fd8ff}
+.profile-habit-icon.nutrition{background:rgba(242,100,17,.16);color:var(--accent-soft)}
+.profile-habit-icon.creatine{background:rgba(92,186,92,.16);color:#b4f3b4}
+.profile-habit-icon.sleep{background:rgba(178,148,255,.16);color:#d2c2ff}
+.profile-habit-copy{display:grid;gap:5px;min-width:0}
+.profile-habit-copy strong,.profile-mini-card strong{font-size:1rem;font-weight:800}
+.profile-habit-copy span,.profile-mini-card span,.profile-nutrition-side span{font-size:.66rem;font-weight:800;letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+.profile-habit-actions{display:flex;gap:10px}
+.profile-habit-actions button,.profile-toggle{min-width:48px;height:48px;padding:0 16px;border:none;border-radius:16px;background:rgba(255,255,255,.07);color:var(--text);display:inline-flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:900}
+.profile-habit-actions button.plus{background:linear-gradient(135deg,var(--accent-soft),var(--accent));color:#2d1206}
+.profile-habit-card.nutrition{grid-template-columns:1fr auto;align-items:start}
+.profile-nutrition-side{text-align:right}
+.profile-nutrition-side strong{display:block;font-family:'Barlow Condensed',sans-serif;font-size:2.4rem;line-height:.9;font-style:italic;font-weight:900;color:#fff}
+.profile-progress-bar{grid-column:1/-1;height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+.profile-progress-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent-soft),var(--accent))}
+.profile-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
+.profile-mini-card{display:grid;gap:14px;padding:18px;border-radius:22px;background:#262626}
+.profile-toggle{min-width:unset;justify-content:center;padding:0 14px;font-size:.84rem;letter-spacing:.12em;text-transform:uppercase}
+.profile-toggle.active{background:rgba(92,186,92,.16);color:#b4f3b4}
+.profile-sleep-btn{background:rgba(255,255,255,.08);color:var(--text)}
+.profile-links-card{display:grid;overflow:hidden}
+.profile-links-card button{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;min-height:64px;padding:0 20px;border:none;border-bottom:1px solid rgba(255,255,255,.06);background:transparent;color:var(--text);text-align:left}
+.profile-links-card button:last-child{border-bottom:none}
+.profile-links-card .material-symbols-outlined{color:var(--accent-soft)}
+.profile-links-card .chev{justify-self:end;color:#8a8a8a}
+.profile-links-card button span:nth-child(2){font-size:.82rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.profile-signout{background:#f4f4f4;color:#111}
 .active-note-input{width:100%;min-height:92px;margin-top:10px;padding:12px 14px;border:none;border-radius:16px;background:rgba(255,255,255,.05);color:var(--text);resize:vertical}
 .ph{border-left:none!important;padding:0!important;background:none!important}
 .ph-row1,.ph-row2{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
@@ -5287,16 +5447,16 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
 .donebtn{margin-top:18px;width:100%;min-height:62px;border:none!important;border-radius:20px!important;background:linear-gradient(135deg,var(--accent-soft),var(--accent))!important;color:#280f05!important;font-weight:900!important;letter-spacing:.18em!important;text-transform:uppercase;box-shadow:0 18px 34px rgba(242,100,17,.24)}
 .donebtn.da{background:rgba(92,186,92,.18)!important;color:#cdeec8!important}
 .progress-top-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:16px}
-.progress-feature-card{grid-column:1/-1;padding:22px}
-.progress-feature-card canvas{height:220px!important}
+.progress-feature-card{grid-column:1/-1;padding:22px;min-width:0;overflow:hidden}
+.progress-feature-card canvas{height:220px!important;max-width:100%!important}
 .progress-feature-metric{margin:10px 0 18px;font-family:'Barlow Condensed',sans-serif;font-size:2rem;font-style:italic;font-weight:900;color:var(--accent-soft)}
 .progress-stat-card{padding:20px;display:flex;flex-direction:column;gap:10px;justify-content:center;align-items:flex-start}
 .progress-stat-card span{color:var(--accent)}
 .progress-stat-card strong{font-family:'Barlow Condensed',sans-serif;font-size:2rem;font-style:italic;font-weight:900}
 .progress-stat-card em{font-style:normal;font-size:.62rem;color:var(--muted);font-weight:800;letter-spacing:.14em}
-.progress-cards{display:grid;grid-template-columns:1fr;gap:14px;margin-top:16px}
-.progress-card{padding:20px;background:#353534}
-.progress-card canvas{height:220px!important}
+.progress-cards{display:grid;grid-template-columns:1fr;gap:14px;margin-top:16px;min-width:0}
+.progress-card{padding:20px;background:#353534;min-width:0;overflow:hidden}
+.progress-card canvas{height:220px!important;max-width:100%!important}
 .chart-title{font-size:.68rem;font-weight:800;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-bottom:12px}
 .workout-tip-card{position:relative;overflow:hidden;min-height:184px;margin-top:16px;padding:20px;display:flex;align-items:flex-end}
 .workout-tip-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.38;filter:grayscale(1)}
@@ -5329,6 +5489,8 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
   .er,.er-dual{grid-template-columns:auto 1fr;gap:10px}
   .et,.ari,.ww,.er-actions,.sb,.drh{grid-column:2}
   .er-actions{justify-content:flex-end}
+  .profile-hero{grid-template-columns:auto 1fr}
+  .profile-pro-badge{justify-self:end}
 }
 
 @media(max-width:460px){
@@ -5342,6 +5504,11 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
   .active-participant-head{flex-direction:column}
   .active-participant-time{width:100%;flex-wrap:wrap}
   .active-timer-actions,.active-queue-actions{width:100%}
+  .profile-hero{grid-template-columns:1fr;justify-items:start}
+  .profile-pro-badge{justify-self:start}
+  .profile-metric-head,.profile-habit-card,.profile-habit-card.nutrition{grid-template-columns:1fr}
+  .profile-habit-actions,.profile-nutrition-side{justify-self:start;text-align:left}
+  .profile-two-col{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -5461,19 +5628,16 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
 
     <section id="dashboard-consistency" class="dashboard-card"></section>
 
-    <section class="sbar">
+    <section class="dashboard-metric-grid">
       <button class="stat" onclick="focusStat('days')" title="Jump to calendar"><div class="stat-icon material-symbols-outlined">calendar_month</div><div class="sn" id="dashboard-workouts">00</div><div class="sl">WORKOUTS / MONTH</div></button>
       <button class="stat" onclick="focusStat('tonnage')" title="Open progress"><div class="stat-icon material-symbols-outlined">speed</div><div class="sn" id="stat-tonnage">0</div><div class="sl">TOTAL KG MOVED</div></button>
-      <button class="stat" onclick="focusStat('ex')" title="Jump to workouts"><div class="stat-icon material-symbols-outlined">list_alt</div><div class="sn" id="stat-ex">0</div><div class="sl">EXERCISES DONE</div></button>
-      <button class="stat" onclick="focusStat('consistency')" title="Open progress"><div class="stat-icon material-symbols-outlined">insights</div><div class="sn" id="stat-consistency">0</div><div class="sl">CONSISTENCY %</div></button>
-      <div id="stat-days" style="display:none">0</div>
     </section>
+    <div id="stat-days" style="display:none">0</div>
+    <div id="stat-ex" style="display:none">0</div>
+    <div id="stat-consistency" style="display:none">0</div>
 
     <section class="qbar">
       <button class="dashboard-primary-cta" onclick="openTodayWorkout()"><span class="material-symbols-outlined">add</span><span>Start Workout</span></button>
-      <button class="dashboard-secondary-cta" onclick="openAddWorkoutQuick()">Add Routine</button>
-      <button class="dashboard-secondary-cta" onclick="openUpdateQuick()">Check Update</button>
-      <button class="dashboard-secondary-cta" id="qbar-admin-btn" style="display:none" onclick="openAdminDataPage()">Admin Data</button>
     </section>
 
     <section class="dashboard-feed">
@@ -5575,13 +5739,6 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
 
     <section class="progress-section-block">
       <div class="dashboard-section-head">
-        <h3>Recovery Metrics</h3>
-      </div>
-      <div id="health-checklist"></div>
-    </section>
-
-    <section class="progress-section-block">
-      <div class="dashboard-section-head">
         <h3>Personal Records</h3>
       </div>
       <div id="pr-wall"></div>
@@ -5632,6 +5789,20 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
         </figure>
       </div>
     </section>
+  </div>
+
+  <div id="mobile-profile-section" class="mobile-section">
+    <section class="screen-head progress-head">
+      <div>
+        <span class="screen-kicker">DAILY INPUTS</span>
+        <h2 class="screen-title">PROFILE</h2>
+      </div>
+      <div class="screen-count">
+        <span class="screen-count-label">ACTIVE USER</span>
+        <span class="screen-count-value" id="profile-active-user">USER</span>
+      </div>
+    </section>
+    <div id="profile-root" class="profile-shell"></div>
   </div>
 </div>
 </div>
@@ -5877,9 +6048,13 @@ body[data-mobile-section="progress"] #mobile-progress-section{display:block}
     <span class="bnav-icon material-symbols-outlined">insights</span>
     <span class="bnav-label">Progress</span>
   </button>
-  <button class="bnav-item" data-section="settings" ontouchstart="navTo('settings', this)" onclick="navTo('settings', this)">
+  <button class="bnav-item" data-section="profile" ontouchstart="navTo('profile', this)" onclick="navTo('profile', this)">
     <span class="bnav-icon material-symbols-outlined">person</span>
     <span class="bnav-label">Profile</span>
+  </button>
+  <button class="bnav-item" data-section="settings" ontouchstart="navTo('settings', this)" onclick="navTo('settings', this)">
+    <span class="bnav-icon material-symbols-outlined">settings</span>
+    <span class="bnav-label">Settings</span>
   </button>
 </nav>
 </body>
