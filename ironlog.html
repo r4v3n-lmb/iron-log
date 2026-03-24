@@ -85,6 +85,7 @@
   let lastUpdateToastVersion = "";
   let mobileSection = "dashboard";
   let workoutSearchQuery = "";
+  let activeWorkoutParticipantIndex = 0;
   let managementTab = "exercises";
   let adminFilterQuery = "";
   let adminFilterUser = "all";
@@ -338,6 +339,15 @@
     const sy = window.scrollY;
     renderDayPanel(key); window.scrollTo(0, sy);
     await saveData();
+  };
+  window.shiftActiveWorkoutParticipant=function(key, dir){
+    const day=WORKOUT_PLAN[key];
+    if(!day) return;
+    const wo=getWorkout(activeDate,key);
+    const participants=(getSessionParticipants(activeDate,key) || wo.sessionParticipants || day.participants || [activeProfile]).filter(Boolean);
+    if(participants.length<=1) return;
+    activeWorkoutParticipantIndex=(activeWorkoutParticipantIndex + dir + participants.length) % participants.length;
+    renderDayPanel(key);
   };
 
   // SESSION TIMER
@@ -1271,17 +1281,17 @@
   }
   function getWeeklyFreq(){
     const w=["Wk 1","Wk 2","Wk 3","Wk 4"],c=[0,0,0,0],p=getMonthKey();
-    Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; const i=Math.min(Math.floor((new Date(d+"T12:00:00").getDate()-1)/7),3); if(Object.values(state.workouts[d]).some(x=>x.done))c[i]++; });
+    getVisibleWorkedDates().forEach(d=>{ if(!String(d).startsWith(p)) return; const i=Math.min(Math.floor((new Date(d+"T12:00:00").getDate()-1)/7),3); c[i]++; });
     return {w,c};
   }
   function getDayTypeBreakdown(){
     const p=getMonthKey(),b={}; Object.keys(WORKOUT_PLAN).forEach(k=>b[k]=0);
-    Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>{ if(state.workouts[d][k].done)b[k]=(b[k]||0)+1; }); });
+    Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>{ if(sessionHasLoggedActivity(state.workouts[d][k]) || state.workouts[d][k]?.done)b[k]=(b[k]||0)+1; }); });
     return b;
   }
   function getMonthTonnage(){
     const p=getMonthKey(),r=[];
-    Object.keys(state.workouts||{}).sort().forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>{ if(state.workouts[d][k].done){ const t=calcSessionTonnage(d,k); if(t>0)r.push({date:d,dayKey:k,tonnage:t,label:d.slice(5)}); }}); });
+    Object.keys(state.workouts||{}).sort().forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>{ if(sessionHasLoggedActivity(state.workouts[d][k]) || state.workouts[d][k]?.done){ const t=calcSessionTonnage(d,k); if(t>0)r.push({date:d,dayKey:k,tonnage:t,label:d.slice(5)}); }}); });
     return r;
   }
   function getBwHistory(){
@@ -1751,20 +1761,16 @@
     });
     return deduped.slice(0, limit);
   }
+  function getVisibleActivityFallback(limit=3){
+    return getVisibleWorkedDates(limit).map(ds=>{
+      const ownDay = state.workouts?.[ds] ? Object.keys(state.workouts[ds])[0] : "";
+      const title = ownDay && WORKOUT_PLAN[ownDay]?.title ? WORKOUT_PLAN[ownDay].title : "Workout Logged";
+      return { date: ds, title };
+    });
+  }
 
   function getCurrentStreakDays(){
-    const completedDates = new Set();
-    Object.keys(state.workouts || {}).forEach(ds=>{
-      if(getCalendarWorkedMeta(ds).worked) completedDates.add(ds);
-    });
-    if(activeProfile==="revan" && state.allUserWorkouts){
-      Object.keys(state.allUserWorkouts).forEach(pk=>{
-        const workouts=state.allUserWorkouts[pk]?.workouts||{};
-        Object.keys(workouts).forEach(ds=>{
-          if(getCalendarWorkedMeta(ds).worked) completedDates.add(ds);
-        });
-      });
-    }
+    const completedDates = new Set(getVisibleWorkedDates());
     const today = new Date(getTodayStr()+"T12:00:00");
     let cursor = new Date(today);
     if(!completedDates.has(cursor.toISOString().split("T")[0])){
@@ -1778,6 +1784,23 @@
       cursor.setDate(cursor.getDate() - 1);
     }
     return streak;
+  }
+  function getVisibleWorkedDates(limit=0){
+    const dates = new Set();
+    Object.keys(state.workouts||{}).forEach(ds=>{
+      if(getCalendarWorkedMeta(ds).worked) dates.add(ds);
+    });
+    if(activeProfile==="revan" && state.allUserWorkouts){
+      Object.keys(state.allUserWorkouts).forEach(pk=>{
+        const workouts=state.allUserWorkouts[pk]?.workouts||{};
+        Object.keys(workouts).forEach(ds=>{
+          const hasVisible = Object.values(workouts[ds]||{}).some(wo=>wo?.done || sessionHasLoggedActivity(wo));
+          if(hasVisible) dates.add(ds);
+        });
+      });
+    }
+    const sorted = Array.from(dates).sort((a,b)=>b.localeCompare(a));
+    return limit>0 ? sorted.slice(0,limit) : sorted;
   }
   function getCalendarWorkedMeta(ds){
     const wd = state.workouts?.[ds];
@@ -1873,18 +1896,14 @@
     const activityMarkup = ()=>{
       const sessions = getRecentDashboardSessions(3);
       if(!sessions.length){
-        const fallbackDays = [];
-        Object.keys(state.workouts||{}).sort((a,b)=>b.localeCompare(a)).forEach(ds=>{
-          if(fallbackDays.length>=3) return;
-          if(getCalendarWorkedMeta(ds).worked) fallbackDays.push(ds);
-        });
+        const fallbackDays = getVisibleActivityFallback(3);
         if(fallbackDays.length){
-          return fallbackDays.map(ds=>`
-            <button class="activity-card" onclick="setMobileSection('progress');selectDate('${ds}')">
+          return fallbackDays.map(item=>`
+            <button class="activity-card" onclick="setMobileSection('progress');selectDate('${item.date}')">
               <span class="activity-icon material-symbols-outlined">fitness_center</span>
               <span class="activity-copy">
-                <span class="activity-title">Workout Logged</span>
-                <span class="activity-meta">${new Date(ds+"T12:00:00").toLocaleDateString("en-ZA",{weekday:"short", day:"numeric", month:"short"})}</span>
+                <span class="activity-title">${item.title}</span>
+                <span class="activity-meta">${new Date(item.date+"T12:00:00").toLocaleDateString("en-ZA",{weekday:"short", day:"numeric", month:"short"})}</span>
               </span>
               <span class="activity-tag">View</span>
             </button>
@@ -2128,8 +2147,11 @@
     const waterTargetGlasses=Math.max(1,Math.round((adjustedWaterTarget/0.25)));
     const proteinPct=Math.min(100,Math.round(((h.protein||0)/proteinTarget)*100));
     const calories=Math.max(0,Math.round(Number(h.calories||0)));
+    const calorieTarget=Math.max(1800, Math.round((proteinTarget * 12)));
+    const caloriesPct=Math.min(100,Math.round((calories/calorieTarget)*100));
     const sleepHours=Math.floor(Number(h.sleep||0));
     const sleepMins=Math.round((Number(h.sleep||0)-sleepHours)*60);
+    const sleepPct=Math.min(100,Math.round((Number(h.sleep||0)/8)*100));
     el.innerHTML=`
       <section class="profile-hero">
         <button class="profile-avatar profile-avatar-edit" onclick="triggerProfileAvatarUpload()"><img src="${avatarSrc}" alt="Profile"><span class="material-symbols-outlined">photo_camera</span></button>
@@ -2163,7 +2185,7 @@
           </div>
           <div class="profile-nutrition-side">
             <strong>${h.protein||0}</strong><span>PROTEIN</span>
-            <button class="profile-inline-link" onclick="adjHealth('protein',25)">+25G</button>
+            <div class="profile-inline-group"><button class="profile-inline-link" onclick="adjHealth('protein',-5)">-5G</button><button class="profile-inline-link" onclick="adjHealth('protein',5)">+5G</button></div>
           </div>
           <div class="profile-progress-bar"><div class="profile-progress-fill" style="width:${proteinPct}%"></div></div>
         </div>
@@ -2176,19 +2198,21 @@
           <div class="profile-mini-card">
             <div class="profile-habit-icon sleep"><span class="material-symbols-outlined">bedtime</span></div>
             <div><strong>Sleep</strong><span>${sleepHours} H ${String(sleepMins).padStart(2,'0')} M</span></div>
+            <div class="profile-progress-bar"><div class="profile-progress-fill sleep" style="width:${sleepPct}%"></div></div>
             <button class="profile-sleep-btn" onclick="logSleepPrompt()">LOG SLEEP</button>
           </div>
         </div>
         <div class="profile-two-col">
           <div class="profile-mini-card">
             <div class="profile-habit-icon nutrition"><span class="material-symbols-outlined">local_fire_department</span></div>
-            <div><strong>Calories</strong><span>${calories} KCAL TODAY</span></div>
-            <button class="profile-sleep-btn" onclick="logCaloriesPrompt()">LOG CALORIES</button>
+            <div><strong>Calories</strong><span>${calories} / ${calorieTarget} KCAL</span></div>
+            <div class="profile-progress-bar"><div class="profile-progress-fill calories" style="width:${caloriesPct}%"></div></div>
+            <div class="profile-inline-group"><button class="profile-inline-link" onclick="adjHealth('calories',-100)">-100</button><button class="profile-inline-link" onclick="adjHealth('calories',100)">+100</button></div>
           </div>
-          <div class="profile-mini-card">
-            <div class="profile-habit-icon water"><span class="material-symbols-outlined">monitor_weight</span></div>
-            <div><strong>Bodyweight</strong><span>${bw>0?`${bw.toFixed(1)} KG`:'NO WEIGH-IN YET'}</span></div>
-            <button class="profile-sleep-btn" onclick="logTodayWeightPrompt()">LOG WEIGHT</button>
+          <div class="profile-mini-card profile-mini-card-muted">
+            <div class="profile-habit-icon water"><span class="material-symbols-outlined">water_full</span></div>
+            <div><strong>Hydration Goal</strong><span>${adjustedWaterTarget.toFixed(1)}L TARGET</span></div>
+            <button class="profile-sleep-btn" onclick="adjHealth('water',0.25)">ADD 250ML</button>
           </div>
         </div>
       </section>
@@ -2284,6 +2308,21 @@
     renderVisualProgressGallery();
     await saveData();
   };
+  function bindActiveWorkoutSwipe(key){
+    const card=document.querySelector(".active-participant-card");
+    if(!card) return;
+    let startX=0;
+    card.addEventListener("touchstart", e=>{
+      startX=e.changedTouches?.[0]?.clientX||0;
+    }, {passive:true});
+    card.addEventListener("touchend", e=>{
+      const endX=e.changedTouches?.[0]?.clientX||0;
+      const dx=endX-startX;
+      if(Math.abs(dx)<40) return;
+      if(dx<0) shiftActiveWorkoutParticipant(key,1);
+      else shiftActiveWorkoutParticipant(key,-1);
+    }, {passive:true});
+  }
   window.logTodayWeightPrompt=async function(){
     const current=getPBW(activeProfile,getTodayStr())||"";
     const next=prompt("Log today's bodyweight (kg)", current);
@@ -2409,12 +2448,16 @@
     const muscleVol = { chest: 0, back: 0, shoulders: 0, arms: 0, legs: 0, core: 0, other: 0 };
     Object.keys(wo).forEach(dayKey => {
       const session = wo[dayKey];
-      if (!session.done) return;
+      if (!sessionHasLoggedActivity(session) && !session?.done) return;
       const day = WORKOUT_PLAN[dayKey];
       if (!day) return;
       day.exercises.forEach(ex => {
         const muscle = getMuscleGroup(ex.name);
-        muscleVol[muscle] = (muscleVol[muscle] || 0) + (ex.sets || 0);
+        const hasActivity = (day.participants||[activeProfile]).some(pp=>{
+          const { data } = getExData(session.exercises||{}, pp, ex.name);
+          return data?.checked || parseFloat(data?.weight||0)>0 || parseFloat(data?.actualReps||0)>0 || (Array.isArray(data?.coverSets) && data.coverSets.length);
+        });
+        if(hasActivity) muscleVol[muscle] = (muscleVol[muscle] || 0) + (ex.sets || 0);
       });
     });
     return muscleVol;
@@ -2610,11 +2653,11 @@
       <div class="orm-inputs">
         <div class="orm-input-group">
           <label class="orm-input-label">WORKING WEIGHT (kg)</label>
-          <input type="number" id="orm-weight" class="orm-input" placeholder="e.g. 100" step="0.5" min="0" onchange="updateORM()" oninput="updateORM()">
+          <div class="orm-stepper"><button onclick="adjustOrmValue('weight',-2.5)">−</button><input type="number" id="orm-weight" class="orm-input" placeholder="e.g. 100" step="0.5" min="0" onchange="updateORM()" oninput="updateORM()"><button onclick="adjustOrmValue('weight',2.5)">+</button></div>
         </div>
         <div class="orm-input-group">
           <label class="orm-input-label">REPS AT WEIGHT</label>
-          <input type="number" id="orm-reps" class="orm-input" placeholder="e.g. 8" step="1" min="1" max="50" onchange="updateORM()" oninput="updateORM()">
+          <div class="orm-stepper"><button onclick="adjustOrmValue('reps',-1)">−</button><input type="number" id="orm-reps" class="orm-input" placeholder="e.g. 8" step="1" min="1" max="50" onchange="updateORM()" oninput="updateORM()"><button onclick="adjustOrmValue('reps',1)">+</button></div>
         </div>
       </div>
       <div id="orm-display" style="display:none">
@@ -2630,6 +2673,14 @@
     </div>`;
     updateORM();
   }
+  window.adjustOrmValue=function(kind, delta){
+    const el=document.getElementById(kind==="weight"?"orm-weight":"orm-reps");
+    if(!el) return;
+    const current=Number(el.value||0);
+    const next=Math.max(kind==="reps"?1:0, current + delta);
+    el.value=kind==="reps" ? Math.round(next) : Math.round(next*10)/10;
+    updateORM();
+  };
 
   window.updateORM = function() {
     const w = parseFloat(document.getElementById('orm-weight')?.value || 0);
@@ -2686,7 +2737,9 @@
       const active=participants.includes(pp);
       return `<button class="active-track-pill ${active?'selected':''}" style="${active?`--track:${pcolor};color:${pcolor}`:''}" onclick="toggleSessionParticipant('${key}','${pp}')">${PROFILES[pp]?.label||pp}</button>`;
     }).join("")}</div>` : "";
-    const participantCards=activeExercise ? participants.map(pp=>{
+    activeWorkoutParticipantIndex=Math.min(activeWorkoutParticipantIndex, Math.max(participants.length-1,0));
+    const displayedParticipants=participants.length>1 ? [participants[activeWorkoutParticipantIndex]] : participants;
+    const participantCards=activeExercise ? displayedParticipants.map(pp=>{
       const {key:exKey,data:edRaw}=getExData(wo.exercises,pp,activeExercise.name);
       const ed=edRaw||{};
       const lastWeight=getLastWeight(key,activeExercise.name,pp);
@@ -2709,13 +2762,14 @@
         </div>
         <div class="active-workout-stats-row">
           <div class="active-workout-stat"><span>Previous Best</span><strong>${lastWeight?.weight || "—"} <em>kg</em></strong></div>
-          <div class="active-workout-stat"><span>Bodyweight</span><strong>${getPBW(pp,isToday?getTodayStr():activeDate)||"—"} <em>kg</em></strong></div>
+          <div class="active-workout-stat"><span>Target Reps</span><strong>${activeExercise.reps || "—"} <em>reps</em></strong></div>
         </div>
         <button class="active-workout-log" ${!isEditable||ed.checked?'disabled':''} onclick="finishActiveExercise('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined">check_circle</span><span>Finish Exercise</span></button>
         ${ed.checked && isEditable ? `<button class="active-secondary-btn" onclick="reopenExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Reopen</button>` : ""}
         <div class="active-workout-history"><div class="active-workout-history-head"><h4>Exercise Log</h4><span>${setHistory.length ? `${setHistory.length} logged` : `${activeExercise.sets || 0} target sets`}</span></div><div class="active-workout-history-list">${setHistory.length ? setHistory.map((set, index)=>`<div class="active-set-row"><div><strong>${String(index+1).padStart(2,"0")}</strong><span>${set.weight || 0}kg × ${set.reps || 0} reps</span></div><span class="material-symbols-outlined">check_circle</span></div>`).join("") : `<div class="active-set-row active-set-row-empty"><div><strong>00</strong><span>No logged set snapshots yet</span></div><span class="material-symbols-outlined">hourglass_empty</span></div>`}</div></div>
       </section>`;
     }).join("") : `<div class="activity-empty">No exercises in this workout yet.</div>`;
+    const swipeControls=participants.length>1 ? `<div class="active-swipe-head"><button class="active-swipe-btn" onclick="shiftActiveWorkoutParticipant('${key}',-1)"><span class="material-symbols-outlined">chevron_left</span></button><span class="active-swipe-label">${PROFILES[displayedParticipants[0]]?.label||displayedParticipants[0]} · ${activeWorkoutParticipantIndex+1}/${participants.length}</span><button class="active-swipe-btn" onclick="shiftActiveWorkoutParticipant('${key}',1)"><span class="material-symbols-outlined">chevron_right</span></button></div>` : "";
     const nextExercise=queue.find((item, idx)=>idx>activeExerciseIndex && !item.allDone);
     const sessionNote=wo.notes||"";
     panel.innerHTML=`<section class="active-workout-shell">
@@ -2726,6 +2780,7 @@
       <div class="active-workout-visual"><div class="active-workout-overlay"><div class="active-workout-stat"><span>Workout</span><strong>${day.title}</strong></div><div class="active-workout-stat"><span>Progress</span><strong>${pct}<em>%</em></strong></div></div></div>
       ${participantSelectors}
       <div class="active-panel-meta"><span>${formatDate(activeDate)}</span>${ton>0?`<span>${ton}kg moved</span>`:""}${!isEditable?`<span>VIEW ONLY</span>${isPastDate?'<button class="active-secondary-inline" onclick="unlockActiveDate()">Unlock</button>':''}`:""}</div>
+      ${swipeControls}
       ${participantCards}
       ${nextExercise ? `<button class="active-workout-next" onclick="document.getElementById('queue-item-${nextExercise.index}')?.scrollIntoView({behavior:'smooth',block:'center'})"><div><span>Next Exercise</span><strong>${nextExercise.ex.name}</strong></div><em>${nextExercise.ex.sets || 0} sets</em></button>` : ""}
       <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Paused or not started: reorder enabled':'Pause to reorder next exercises'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${item.ex.sets || 0} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div></section>
@@ -2733,6 +2788,7 @@
     </section>`;
     panel.style.display="block";
     updateTimerBtns();
+    bindActiveWorkoutSwipe(key);
     syncWorkoutFocusState();
   }
 
@@ -5181,6 +5237,8 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .orm-input-group{display:flex;flex-direction:column;gap:4px}
 .orm-input-label{font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.7rem;color:var(--muted)}
 .orm-input{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:8px 11px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;outline:none;border-radius:3px;font-size:.88rem}
+.orm-stepper{display:grid;grid-template-columns:42px 1fr 42px;gap:8px;align-items:center}
+.orm-stepper button{height:42px;border:none;border-radius:12px;background:rgba(255,255,255,.08);color:var(--text);font-family:'Barlow Condensed',sans-serif;font-size:1.2rem;font-weight:900}
 .orm-input:focus{border-color:var(--accent)}
 .orm-result{background:linear-gradient(135deg,rgba(232,93,4,0.1),rgba(232,93,4,0.05));border:1px solid rgba(232,93,4,.3);border-radius:6px;padding:13px;text-align:center}
 .orm-result-value{font-size:2.2rem;font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.1em;color:#e85d04}
@@ -5592,6 +5650,9 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .active-inline-input{height:38px;min-width:88px;padding:0 10px;border:none;border-radius:12px;background:rgba(255,255,255,.05);color:var(--text)}
 .active-inline-input-sm{min-width:64px}
 .active-workout-stats-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.active-swipe-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-radius:18px;background:rgba(255,255,255,.04)}
+.active-swipe-btn{width:42px;height:42px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);display:grid;place-items:center}
+.active-swipe-label{font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
 .active-secondary-btn{min-height:42px;padding:0 14px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.1em;text-transform:uppercase}
 .active-timer-actions{display:flex;gap:8px;margin-top:8px}
 .active-timer-btn{min-height:40px;padding:0 14px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.1em;text-transform:uppercase;display:inline-flex;align-items:center;justify-content:center;text-align:center}
@@ -5658,10 +5719,14 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .profile-nutrition-side{text-align:right}
 .profile-nutrition-side strong{display:block;font-family:'Barlow Condensed',sans-serif;font-size:2.4rem;line-height:.9;font-style:italic;font-weight:900;color:#fff}
 .profile-inline-link{margin-top:10px;min-height:34px;padding:0 10px;border:none;border-radius:999px;background:rgba(255,255,255,.08);color:var(--accent-soft);font-family:'Barlow Condensed',sans-serif;font-size:.72rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
+.profile-inline-group{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .profile-progress-bar{grid-column:1/-1;height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
 .profile-progress-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent-soft),var(--accent))}
+.profile-progress-fill.sleep{background:linear-gradient(90deg,#60a5fa,#22c55e)}
+.profile-progress-fill.calories{background:linear-gradient(90deg,#f59e0b,#f26411)}
 .profile-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
 .profile-mini-card{display:grid;gap:14px;padding:18px;border-radius:22px;background:#262626}
+.profile-mini-card-muted{background:#222}
 .profile-toggle{min-width:unset;justify-content:center;padding:0 14px;font-size:.84rem;letter-spacing:.12em;text-transform:uppercase}
 .profile-toggle.active{background:rgba(92,186,92,.16);color:#b4f3b4}
 .profile-sleep-btn{background:rgba(255,255,255,.08);color:var(--text)}
@@ -5753,7 +5818,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 }
 
 @media(max-width:460px){
-  .qbar,.sbar,.progress-top-grid,.phr{grid-template-columns:1fr}
+  .qbar,.sbar,.phr{grid-template-columns:1fr}
   .screen-head{align-items:flex-start;flex-direction:column}
   .screen-count{align-items:flex-start}
   .active-workout-controls,.active-workout-overlay{grid-template-columns:1fr}
