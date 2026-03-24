@@ -69,7 +69,7 @@
   let BASE_PROFILES = {};
 
   let activeProfile = localStorage.getItem("ironlog_profile")||"revan";
-  let state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{} };
+  let state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{}, visualProgress:[] };
   let activeDay = null;
   let activeDate = getTodayStr();
   let unsubscribeFn = null;
@@ -561,6 +561,7 @@
           state.health        = profileData.health     || {};
           state.exerciseMeta  = profileData.exerciseMeta || {};
           state.userOverrides = profileData.userOverrides || {};
+          state.visualProgress = Array.isArray(profileData.visualProgress) ? profileData.visualProgress : [];
           applyUserOverrides(state.userOverrides);
           if(!profileData.plan) saveData();
           if(activeProfile === "revan" && !hasScopedData && (d.plan || d.workouts || d.prs || d.savedWorkouts || d.gymUrl)) saveData();
@@ -576,7 +577,7 @@
           else console.warn('[IronLog] WARNING: workouts object is empty after load!');
         } else {
           WORKOUT_PLAN = seedPlan(activeProfile);
-          state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{} };
+          state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{}, visualProgress:[] };
           applyUserOverrides({});
           latestAppVersion = APP_VERSION;
           appUpdateUrl = DEFAULT_APP_UPDATE_URL;
@@ -602,7 +603,8 @@
             bodyweight: state.bodyweight || {},
             health:     state.health     || {},
             exerciseMeta: state.exerciseMeta || {},
-            userOverrides: state.userOverrides || {}
+            userOverrides: state.userOverrides || {},
+            visualProgress: Array.isArray(state.visualProgress) ? state.visualProgress : []
           }
         },
         legacyMigrationCompleted: true,
@@ -1338,6 +1340,34 @@
         });
       }
     });
+    Object.keys(state.workouts||{}).forEach(date=>{
+      Object.keys(state.workouts[date]||{}).forEach(dayKey=>{
+        const wo=state.workouts[date]?.[dayKey];
+        if(!wo) return;
+        Object.keys(wo.exercises||{}).forEach(exKey=>{
+          const raw=wo.exercises[exKey]||{};
+          const participant = raw.participant || (String(exKey).includes("_") ? String(exKey).split("_")[0] : activeProfile);
+          if(participant !== activeProfile || !raw.checked) return;
+          const weight=parseFloat(raw.weight||0);
+          if(weight<=0) return;
+          const exerciseName=stripParticipantPrefix(stripParticipantPrefix(String(exKey||""))).trim();
+          if(!exerciseName) return;
+          const normalized=exerciseName.toLowerCase();
+          const existing=byExercise.get(normalized);
+          const shouldReplace=!existing || weight > existing.weight || (weight===existing.weight && date > existing.date);
+          if(shouldReplace){
+            byExercise.set(normalized,{
+              exercise: exerciseName,
+              weight,
+              date,
+              daysHeld: Math.floor((new Date(`${getTodayStr()}T12:00:00`) - new Date(`${date}T12:00:00`)) / (1000 * 60 * 60 * 24)),
+              muscleGroup: getMuscleGroup(exerciseName),
+              key: exKey
+            });
+          }
+        });
+      });
+    });
     return Array.from(byExercise.values()).sort((a,b) => b.weight - a.weight);
   }
   function isSkipped(ds){
@@ -1623,7 +1653,7 @@
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions(); renderNotifications(); renderDashboardShell(); renderProfileShell();
+    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions(); renderNotifications(); renderDashboardShell(); renderProfileShell(); renderVisualProgressGallery();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -1677,13 +1707,13 @@
     const pushSession = (ds, key, wo, day, owner=activeProfile)=>{
       const hasExercises = !!Object.keys(wo?.exercises || {}).length;
       const hasSessionMeta = !!(wo?.sessionMeta?.startAt || wo?.sessionMeta?.rpe || wo?.sessionMeta?.durationMins);
-      if(!day || (!sessionHasLoggedActivity(wo) && !wo?.done && !hasExercises && !hasSessionMeta)) return;
+      if((!day && !wo?.done && !hasExercises && !hasSessionMeta) || (!day && !sessionHasLoggedActivity(wo))) return;
       const checkedCount = Object.values(wo?.exercises || {}).filter(entry=>entry?.checked).length;
       items.push({
         date: ds,
         key,
         wo,
-        day,
+        day: day || { title:"Workout Logged", exercises:[] },
         owner,
         tonnage: calcSessionTonnage(ds, key),
         checkedCount
@@ -1711,17 +1741,35 @@
       if(a.date === b.date) return (b.wo?.updatedAt || "").localeCompare(a.wo?.updatedAt || "");
       return b.date.localeCompare(a.date);
     });
-    return items.slice(0, limit);
+    const deduped = [];
+    const seen = new Set();
+    items.forEach(item=>{
+      const stamp=`${item.owner}|${item.date}|${item.key}`;
+      if(seen.has(stamp)) return;
+      seen.add(stamp);
+      deduped.push(item);
+    });
+    return deduped.slice(0, limit);
   }
 
   function getCurrentStreakDays(){
     const completedDates = new Set();
     Object.keys(state.workouts || {}).forEach(ds=>{
-      const sessions = state.workouts[ds] || {};
-      if(Object.values(sessions).some(session=>session?.done)) completedDates.add(ds);
+      if(getCalendarWorkedMeta(ds).worked) completedDates.add(ds);
     });
+    if(activeProfile==="revan" && state.allUserWorkouts){
+      Object.keys(state.allUserWorkouts).forEach(pk=>{
+        const workouts=state.allUserWorkouts[pk]?.workouts||{};
+        Object.keys(workouts).forEach(ds=>{
+          if(getCalendarWorkedMeta(ds).worked) completedDates.add(ds);
+        });
+      });
+    }
     const today = new Date(getTodayStr()+"T12:00:00");
     let cursor = new Date(today);
+    if(!completedDates.has(cursor.toISOString().split("T")[0])){
+      cursor.setDate(cursor.getDate()-1);
+    }
     let streak = 0;
     while(true){
       const ds = cursor.toISOString().split("T")[0];
@@ -1825,6 +1873,23 @@
     const activityMarkup = ()=>{
       const sessions = getRecentDashboardSessions(3);
       if(!sessions.length){
+        const fallbackDays = [];
+        Object.keys(state.workouts||{}).sort((a,b)=>b.localeCompare(a)).forEach(ds=>{
+          if(fallbackDays.length>=3) return;
+          if(getCalendarWorkedMeta(ds).worked) fallbackDays.push(ds);
+        });
+        if(fallbackDays.length){
+          return fallbackDays.map(ds=>`
+            <button class="activity-card" onclick="setMobileSection('progress');selectDate('${ds}')">
+              <span class="activity-icon material-symbols-outlined">fitness_center</span>
+              <span class="activity-copy">
+                <span class="activity-title">Workout Logged</span>
+                <span class="activity-meta">${new Date(ds+"T12:00:00").toLocaleDateString("en-ZA",{weekday:"short", day:"numeric", month:"short"})}</span>
+              </span>
+              <span class="activity-tag">View</span>
+            </button>
+          `).join("");
+        }
         return `<div class="activity-empty">No workouts logged yet. Start a session and your last 3 workouts will show here.</div>`;
       }
       return sessions.map(item=>{
@@ -2053,6 +2118,7 @@
     const p=PROFILES[activeProfile]||{};
     const h=ensureHealthEntry(today);
     const profileName=accountRegistry[activeProfile]?.name || activeProfile;
+    const avatarSrc=getProfileAvatarSrc();
     const profileUserEl = document.getElementById("profile-active-user");
     if(profileUserEl) profileUserEl.textContent = String(profileName).toUpperCase();
     const bw=parseFloat(getPBW(activeProfile,today)||0);
@@ -2066,7 +2132,7 @@
     const sleepMins=Math.round((Number(h.sleep||0)-sleepHours)*60);
     el.innerHTML=`
       <section class="profile-hero">
-        <div class="profile-avatar"><img src="https://lh3.googleusercontent.com/aida-public/AB6AXuAq14oMwfSCnwBlXk3jrf7FxHlEGkdGCJ7_YDaVjG3m90MvqbBNMy49zmc1M1xGjqaO13UXDzihsmsZu0ao_kZ06bBAVcs1SK_XqldIqHNvXcv-kefl6nNY8swPpqwVyT7KpNCjpv8CJWf0fEBQdKfro9nJugvF2YWMwdJ4w3iiq90kn3HGlzfGCc8RjV41-uUt_vbH_MLBTmXonvj5AZUJ3F6CGyROmdBZlx-ELMRMejZp4qHssKfX9g4UHE6VriWa6WEzpnbFciI" alt="Profile"></div>
+        <button class="profile-avatar profile-avatar-edit" onclick="triggerProfileAvatarUpload()"><img src="${avatarSrc}" alt="Profile"><span class="material-symbols-outlined">photo_camera</span></button>
         <div class="profile-hero-copy">
           <h3>${String(profileName).toUpperCase()}</h3>
           <div class="profile-hero-meta"><span class="material-symbols-outlined">verified</span><span>ELITE MEMBER</span></div>
@@ -2134,6 +2200,90 @@
       <button class="profile-signout" onclick="signOutAccount()">SIGN OUT OF IRON LOG</button>
     `;
   }
+  function getProfileAvatarSrc(profileKey=activeProfile){
+    return state.userOverrides?.[profileKey]?.avatar
+      || "https://lh3.googleusercontent.com/aida-public/AB6AXuAq14oMwfSCnwBlXk3jrf7FxHlEGkdGCJ7_YDaVjG3m90MvqbBNMy49zmc1M1xGjqaO13UXDzihsmsZu0ao_kZ06bBAVcs1SK_XqldIqHNvXcv-kefl6nNY8swPpqwVyT7KpNCjpv8CJWf0fEBQdKfro9nJugvF2YWMwdJ4w3iiq90kn3HGlzfGCc8RjV41-uUt_vbH_MLBTmXonvj5AZUJ3F6CGyROmdBZlx-ELMRMejZp4qHssKfX9g4UHE6VriWa6WEzpnbFciI";
+  }
+  window.triggerProfileAvatarUpload=function(){
+    document.getElementById("profile-avatar-input")?.click();
+  };
+  window.handleProfileAvatarUpload=function(event){
+    const file=event.target?.files?.[0];
+    if(!file) return;
+    const reader=new FileReader();
+    reader.onload=async ()=>{
+      if(!state.userOverrides) state.userOverrides={};
+      const cur=state.userOverrides[activeProfile]||{};
+      state.userOverrides[activeProfile]={...cur,avatar:String(reader.result||"")};
+      applyUserOverrides(state.userOverrides);
+      renderProfileShell();
+      await saveData();
+      toast("✓ Profile image updated");
+    };
+    reader.readAsDataURL(file);
+    event.target.value="";
+  };
+  function renderVisualProgressGallery(){
+    const el=document.getElementById("visual-progress-root");
+    if(!el) return;
+    const photos=(Array.isArray(state.visualProgress)?state.visualProgress:[])
+      .filter(item=>item?.src)
+      .sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+    el.innerHTML=`
+      <div class="visual-progress-toolbar">
+        <button class="profile-primary-btn visual-upload-btn" onclick="triggerVisualProgressUpload()">UPLOAD PROGRESS PHOTO</button>
+      </div>
+      <div class="visual-progress-grid">
+        ${photos.length ? photos.slice(0,6).map((photo, index)=>`
+          <figure class="visual-progress-card ${index===0?'active':''}">
+            <img src="${photo.src}" alt="Progress photo ${index+1}">
+            <figcaption>${photo.label || formatVisualProgressLabel(photo.date)}</figcaption>
+            <button class="visual-progress-remove" onclick="removeVisualProgressPhoto('${photo.id}')"><span class="material-symbols-outlined">close</span></button>
+          </figure>
+        `).join("") : `
+          <button class="visual-progress-empty" onclick="triggerVisualProgressUpload()">
+            <span class="material-symbols-outlined">add_a_photo</span>
+            <strong>No progress photos yet</strong>
+            <span>Upload front, side, or check-in shots to track visual changes.</span>
+          </button>
+        `}
+      </div>
+    `;
+  }
+  function formatVisualProgressLabel(dateStr){
+    if(!dateStr) return "UNTITLED";
+    const d=new Date(`${dateStr}T12:00:00`);
+    if(Number.isNaN(d.getTime())) return String(dateStr).toUpperCase();
+    return d.toLocaleDateString("en-ZA",{month:"short",day:"numeric"}).toUpperCase();
+  }
+  window.triggerVisualProgressUpload=function(){
+    document.getElementById("visual-progress-input")?.click();
+  };
+  window.handleVisualProgressUpload=function(event){
+    const files=Array.from(event.target?.files||[]);
+    if(!files.length) return;
+    Promise.all(files.map(file=>new Promise(resolve=>{
+      const reader=new FileReader();
+      reader.onload=()=>resolve({
+        id:`photo_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+        src:String(reader.result||""),
+        date:getTodayStr(),
+        label:getTodayStr()===(getTodayStr())?"TODAY":formatVisualProgressLabel(getTodayStr())
+      });
+      reader.readAsDataURL(file);
+    }))).then(async photos=>{
+      state.visualProgress=[...photos,...(Array.isArray(state.visualProgress)?state.visualProgress:[])].slice(0,12);
+      renderVisualProgressGallery();
+      await saveData();
+      toast(`✓ Added ${photos.length} progress photo${photos.length===1?"":"s"}`);
+    });
+    event.target.value="";
+  };
+  window.removeVisualProgressPhoto=async function(id){
+    state.visualProgress=(Array.isArray(state.visualProgress)?state.visualProgress:[]).filter(photo=>photo.id!==id);
+    renderVisualProgressGallery();
+    await saveData();
+  };
   window.logTodayWeightPrompt=async function(){
     const current=getPBW(activeProfile,getTodayStr())||"";
     const next=prompt("Log today's bodyweight (kg)", current);
@@ -5467,6 +5617,8 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .profile-hero{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:16px;padding:22px 24px}
 .profile-avatar{width:72px;height:72px;border-radius:50%;overflow:hidden;box-shadow:0 10px 22px rgba(0,0,0,.25);background:#202020}
 .profile-avatar img{width:100%;height:100%;object-fit:cover;filter:grayscale(1)}
+.profile-avatar-edit{position:relative;border:none;padding:0;cursor:pointer}
+.profile-avatar-edit span{position:absolute;right:0;bottom:0;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent-soft),var(--accent));color:#2d1206;font-size:1rem;box-shadow:0 10px 16px rgba(0,0,0,.28)}
 .profile-hero-copy h3{font-family:'Barlow Condensed',sans-serif;font-size:2.1rem;line-height:.92;font-style:italic;font-weight:900;letter-spacing:-.03em;text-transform:uppercase}
 .profile-hero-meta{display:inline-flex;align-items:center;gap:6px;margin-top:8px;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.06);font-size:.62rem;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
 .profile-hero-meta .material-symbols-outlined{font-size:1rem;color:var(--accent-soft)}
@@ -5573,6 +5725,12 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .visual-progress-card.active{outline:1px solid rgba(255,181,150,.32)}
 .visual-progress-card figcaption{position:absolute;left:10px;bottom:10px;padding:6px 8px;border-radius:8px;background:rgba(0,0,0,.66);font-size:.62rem;font-weight:800;letter-spacing:.12em;color:var(--accent-soft);text-transform:uppercase}
 .visual-progress-card.active figcaption{background:rgba(255,181,150,.92);color:#111}
+.visual-progress-toolbar{display:flex;justify-content:flex-end}
+.visual-upload-btn{min-height:48px;margin:0;font-size:.82rem}
+.visual-progress-remove{position:absolute;top:10px;right:10px;width:32px;height:32px;border:none;border-radius:50%;background:rgba(17,17,17,.72);color:#fff;display:grid;place-items:center}
+.visual-progress-empty{grid-column:1/-1;min-height:180px;border:none;border-radius:18px;background:#232323;color:var(--text);display:grid;gap:8px;place-items:center;padding:22px;text-align:center}
+.visual-progress-empty strong{font-family:'Barlow Condensed',sans-serif;font-size:1.5rem;font-style:italic;text-transform:uppercase}
+.visual-progress-empty span:last-child{font-size:.76rem;color:var(--muted);line-height:1.4}
 .cal-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;margin-bottom:12px}
 .cal-nav button{width:42px;height:42px;border:none;border-radius:14px;background:rgba(255,255,255,.07);color:var(--text)}
 .bottom-nav{left:0;right:0;bottom:0;width:auto;padding:12px 10px calc(16px + env(safe-area-inset-bottom));border-radius:24px 24px 0 0;background:rgba(26,26,26,.96);backdrop-filter:blur(24px);box-shadow:none}
@@ -5862,7 +6020,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 
     <section class="progress-section-block">
       <div class="dashboard-section-head">
-        <h3>Strength Tool</h3>
+        <h3>1RM Estimator</h3>
       </div>
       <div id="orm-calc"></div>
     </section>
@@ -5882,16 +6040,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
       <div class="dashboard-section-head">
         <h3>Visual Progress</h3>
       </div>
-      <div class="visual-progress-grid">
-        <figure class="visual-progress-card">
-          <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuCtV24lPkEWZeMLY_2CM6TaIorx-Sn_Bp3v5wRxCA8ez9wPwVKpxygFBkbqAptBWV7ca27bwX8GI5zp71RenSkZvxQLnST-7rDuA6faQlRXAYpC5yKzLUdO07bjEXgMVMCKsys8COC4Dvdz-P2B3ECm1h8_HhYYlMfhLm0GBd-obX-W3FAGlu7-0DZ5J9LwUSV14lV8A164GRGDK6-5jVD1DjQlfGzeN4v57iXlptOEDTKXkzC-CLErMB7wUNLY8RsOQV54nC6q7-Y" alt="Progress photo">
-          <figcaption>OCT 01</figcaption>
-        </figure>
-        <figure class="visual-progress-card active">
-          <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuCsekc3hTBjmPV_g6wRjujB_hv-Zz21ckLQF7hrAgWDCJKmWkATz1cwSJxMZrZ502rzLe2T3jTd7H2b49cODRsAgp-arDx8LBRkD8QwXrFArlrozwmrrCFWBq4nGAuHZ3NN8qoAc1LyR5aoHpzrIrqxyA56ZZGgGOjhUC3Jp3PubH4zMw0PBS0hpRHZ0JHnGFL20z8guT7qqebxezwXIEWod7LRF29O2eXjA-x4wCFr5DJgCvc3T3csfJbr4TIZ2O5lje9FR74BARs" alt="Current progress photo">
-          <figcaption>TODAY</figcaption>
-        </figure>
-      </div>
+      <div id="visual-progress-root"></div>
     </section>
   </div>
 
@@ -5910,6 +6059,8 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
   </div>
 </div>
 </div>
+<input id="profile-avatar-input" type="file" accept="image/*" style="display:none" onchange="handleProfileAvatarUpload(event)">
+<input id="visual-progress-input" type="file" accept="image/*" multiple style="display:none" onchange="handleVisualProgressUpload(event)">
 
 <!-- SETTINGS -->
 <div id="sto"></div>
