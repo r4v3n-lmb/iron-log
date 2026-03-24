@@ -1,11 +1,12 @@
-name: Deploy Iron Log to GitHub Pages
+name: Deploy PWA Branch to GitHub Pages
 
 on:
-  push:
-    branches:
-      - main
-      - features
   workflow_dispatch:
+    inputs:
+      confirm_live_deploy:
+        description: "Type DEPLOY_PWA to publish pwa_main/dist to the live GitHub Pages URL"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,26 +14,26 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: "pages-pwa"
   cancel-in-progress: false
 
 jobs:
   deploy:
+    if: ${{ github.event.inputs.confirm_live_deploy == 'DEPLOY_PWA' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout pwa_main
         uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          ref: pwa_main
 
-      - name: Build PWA site
-        run: npm run build
+      - name: Prepare PWA site files
+        run: |
+          test -d dist
+          test -f dist/index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
