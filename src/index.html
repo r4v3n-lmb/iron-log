@@ -340,6 +340,17 @@
       <label class="st-ab" style="cursor:pointer">📤 IMPORT CSV<input type="file" id="cii" accept=".csv" style="display:none"></label>
     </div>
   </div>
+  <div class="sts" data-sec="install">
+    <div class="stst stst-toggle" onclick="toggleSettingsSection('install')"><span>// INSTALL APP</span><span class="st-arrow" id="st-arrow-install">▾</span></div>
+    <div class="st-body">
+      <div class="settings-install-card">
+        <div class="settings-install-title">INSTALL IRON LOG</div>
+        <div id="settings-install-status" class="settings-install-status">CHECKING DEVICE INSTALL STATUS...</div>
+        <div id="settings-install-help" class="settings-install-help">Open this app in a supported browser to install it on your device.</div>
+        <button id="settings-install-btn" class="st-ab" onclick="installPwaApp()" style="display:none;color:#5cba5c;border-color:rgba(92,186,92,.35)">📲 INSTALL ON THIS DEVICE</button>
+      </div>
+    </div>
+  </div>
   <div class="sts" data-sec="management">
     <div class="stst stst-toggle" onclick="toggleSettingsSection('management')"><span>// MANAGEMENT</span><span class="st-arrow" id="st-arrow-management">▾</span></div>
     <div class="st-body">

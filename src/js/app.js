@@ -83,6 +83,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   let settingsSectionState = {
     user: false,
     data: false,
+    install: false,
     management: false,
     admin: false,
     debug: false,
@@ -176,6 +177,41 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const btn = document.getElementById("install-app-btn");
     if(!btn) return;
     btn.style.display = deferredInstallPrompt ? "inline-flex" : "none";
+    renderInstallSettingsBlock();
+  }
+  function isStandaloneMode(){
+    return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+  }
+  function isIosLikeDevice(){
+    const ua = navigator.userAgent || "";
+    return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+  function renderInstallSettingsBlock(){
+    const statusEl = document.getElementById("settings-install-status");
+    const helpEl = document.getElementById("settings-install-help");
+    const btn = document.getElementById("settings-install-btn");
+    if(!statusEl || !helpEl || !btn) return;
+    if(isStandaloneMode()){
+      statusEl.textContent = "IRON LOG IS ALREADY INSTALLED";
+      helpEl.textContent = "This device is already running Iron Log in installed app mode.";
+      btn.style.display = "none";
+      return;
+    }
+    if(deferredInstallPrompt){
+      statusEl.textContent = "INSTALL IS AVAILABLE";
+      helpEl.textContent = "Tap the button below to add Iron Log to your home screen and launch it like a dedicated app.";
+      btn.style.display = "block";
+      return;
+    }
+    if(isIosLikeDevice()){
+      statusEl.textContent = "USE SAFARI SHARE MENU";
+      helpEl.textContent = "On iPhone or iPad, open the browser share menu and choose 'Add to Home Screen' to install Iron Log.";
+      btn.style.display = "none";
+      return;
+    }
+    statusEl.textContent = "INSTALL PROMPT NOT READY";
+    helpEl.textContent = "If you just opened the app, browse a little and check again. You can also use your browser menu and choose 'Install app' or 'Add to Home screen'.";
+    btn.style.display = "none";
   }
   async function registerServiceWorker(){
     if(!("serviceWorker" in navigator)) return;
@@ -4338,11 +4374,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const np=document.getElementById("notif-panel");
     if(np) np.style.display="none";
     settingsSectionState = {
-      user:false,data:false,management:false,admin:false,debug:false,templates:false,theme:false,version:false
+      user:false,data:false,install:false,management:false,admin:false,debug:false,templates:false,theme:false,version:false
     };
     document.getElementById("stp").classList.add("open");
     document.getElementById("sto").style.display="block";
-    renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderSettingsSectionUI();
+    renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderInstallSettingsBlock(); renderSettingsSectionUI();
   };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   function renderSettingsProfiles(){
@@ -4943,6 +4979,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     window.addEventListener("appinstalled", ()=>{
       deferredInstallPrompt = null;
       updateInstallButton();
+      renderInstallSettingsBlock();
       toast("✓ Iron Log installed");
     });
     window.addEventListener("online", ()=>{

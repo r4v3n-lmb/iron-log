@@ -412,6 +412,11 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .st-arrow{font-size:.86rem;line-height:1}
 .sts .st-body{margin-top:9px}
 .sts.collapsed .st-body{display:none}
+.settings-install-card{padding:14px;border-radius:18px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05)}
+.settings-install-title{font-family:'Barlow Condensed',sans-serif;font-size:.96rem;font-weight:900;letter-spacing:.14em;color:var(--text);text-transform:uppercase}
+.settings-install-status{margin-top:8px;font-family:'Barlow Condensed',sans-serif;font-size:.82rem;font-weight:800;letter-spacing:.1em;color:var(--accent-soft);text-transform:uppercase}
+.settings-install-help{margin-top:8px;font-size:.76rem;line-height:1.45;color:var(--muted)}
+#settings-install-btn{margin-top:12px;margin-bottom:0}
 #stprofs{display:flex;gap:5px;flex-wrap:wrap}
 .prof-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:5px 9px;font-family:'Barlow Condensed',sans-serif;font-size:.75rem;letter-spacing:.12em;cursor:pointer;transition:background .1s}
 .prof-btn:hover{background:var(--bg3)}
