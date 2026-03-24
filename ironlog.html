@@ -2,9 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>IRON LOG</title>
 <link rel="icon" type="image/png" href="iron_log_logo.png">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#111111">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script type="module">
@@ -70,6 +75,7 @@
   let appUpdateUrl = DEFAULT_APP_UPDATE_URL;
   let latestAppUpdatedAt = "";
   let lastUpdateToastVersion = "";
+  let mobileSection = "home";
   let managementTab = "exercises";
   let adminFilterQuery = "";
   let adminFilterUser = "all";
@@ -89,10 +95,23 @@
     version: false
   };
   let authInitialized = false;
+  let selectedRPE = null;
+  let selectedPain = "none";
+  const coverState = {
+    dayKey: null,
+    exerciseIndex: 0,
+    exercises: [],
+    currentWeight: {},
+    currentReps: {},
+    loggedSets: {}
+  };
   const THEME_COLORS = ["#f72585","#4361ee","#2ec4b6","#7b2d8b","#f0c040","#5cba5c","#ef4444","#14b8a6","#3b82f6"];
   function canManageWorkoutParticipants(){ return activeProfile==="revan"; }
   function isAdminUser(){ return activeProfile==="revan"; }
   const FIRESTORE_SPARK_LIMIT_BYTES = 1024 * 1024 * 1024;
+  const isMobile = ()=>window.innerWidth <= 600;
+  const isCoverScreen = ()=>window.innerWidth <= 420 && window.innerHeight <= 900;
+  const isFlip = ()=>isCoverScreen();
 
   const ACCOUNTS_DOC = "accounts";
   function toProfileKey(name){
@@ -539,7 +558,7 @@
           console.warn('[IronLog] WARNING: data_shared doc does not exist, seeding fresh');
           saveData();
         }
-        renderDayGrid(); renderAll();
+        renderDayGrid(); renderAll(); handleScreenChange();
       });
     } catch(e){ console.error('[IronLog] loadData error:', e); toast("⚠️ Firebase not connected"); }
   }
@@ -621,6 +640,8 @@
       toast(`⚡ Prefilled ${prefilled} fields from last session`);
     }
     startSessionTimer();
+    if(isCoverScreen()) initCoverPlayerForDay(todayKey);
+    setMobileSection("start");
     window.scrollTo({top:0,behavior:"smooth"});
   };
   window.openAddWorkoutQuick=function(){
@@ -695,6 +716,333 @@
     const urlInput=document.getElementById("app-update-url-input");
     if(urlInput && document.activeElement!==urlInput) urlInput.value = appUpdateUrl || "";
   }
+
+  function syncWorkoutFocusState(){
+    document.body.classList.toggle("exercise-focus", Boolean(activeDay) && isMobile() && !isCoverScreen());
+  }
+
+  function setMobileSection(section){
+    mobileSection = section || "home";
+    document.body.setAttribute("data-mobile-section", mobileSection);
+    syncBottomNavState();
+    syncWorkoutFocusState();
+  }
+
+  function syncBottomNavState(){
+    document.querySelectorAll(".bnav-item").forEach(btn=>{
+      btn.classList.toggle("active", btn.dataset.section === mobileSection);
+    });
+  }
+
+  function applyScreenMode(){
+    document.body.setAttribute("data-screen", isCoverScreen() ? "cover" : "full");
+  }
+
+  function handleScreenChange(){
+    applyScreenMode();
+    if(isCoverScreen()){
+      if(activeDay) initCoverPlayerForDay(activeDay);
+    } else {
+      syncCoverSetsToSession();
+      hideCoverPlayer();
+      syncWorkoutFocusState();
+    }
+  }
+
+  function hideCoverPlayer(){
+    const player = document.getElementById("coverWorkoutPlayer");
+    if(player) player.style.display = "none";
+    document.body.removeAttribute("data-cover-player");
+  }
+
+  function getActiveCoverParticipant(key){
+    return getSessionParticipants(activeDate, key)[0] || activeProfile;
+  }
+
+  function buildWorkoutSnapshot(key){
+    const day = WORKOUT_PLAN[key];
+    if(!day) return null;
+    const wo = getWorkout(activeDate, key);
+    const participant = getActiveCoverParticipant(key);
+    const exercises = (day.exercises || []).map((ex, index)=>{
+      const resolved = getExData(wo.exercises, participant, ex.name);
+      const data = resolved.data || {};
+      return {
+        id: resolved.key,
+        name: ex.name,
+        muscle: getMuscleGroup(ex.name),
+        sets: ex.sets || 0,
+        targetReps: ex.reps || "",
+        weight: parseFloat(data.weight || getLastWeight(key, ex.name, participant)?.weight || 20) || 20,
+        reps: parseInt(data.actualReps || ex.reps || 8, 10) || 8,
+        checked: Boolean(data.checked),
+        coverSets: Array.isArray(data.coverSets) ? data.coverSets : [],
+        raw: ex,
+        participant,
+        index
+      };
+    });
+    return { key, day, exercises };
+  }
+
+  function initCoverPlayerForDay(key){
+    if(!isCoverScreen()) return;
+    const snapshot = buildWorkoutSnapshot(key);
+    if(!snapshot) return;
+    coverState.dayKey = key;
+    coverState.exerciseIndex = Math.min(coverState.exerciseIndex, Math.max(snapshot.exercises.length - 1, 0));
+    coverState.exercises = snapshot.exercises;
+    snapshot.exercises.forEach((ex, i)=>{
+      coverState.currentWeight[i] = ex.weight;
+      coverState.currentReps[i] = ex.reps;
+      coverState.loggedSets[i] = Array.isArray(ex.coverSets) && ex.coverSets.length
+        ? ex.coverSets.map(set=>({ weight:set.weight, reps:set.reps, ts:set.ts || Date.now() }))
+        : [];
+      if(ex.checked && coverState.loggedSets[i].length === 0){
+        coverState.loggedSets[i].push({ weight: ex.weight, reps: ex.reps });
+      }
+    });
+    buildCoverCards();
+    updateCoverDisplay();
+    const player = document.getElementById("coverWorkoutPlayer");
+    if(player) player.style.display = "flex";
+    document.body.setAttribute("data-cover-player", "active");
+    setMobileSection("start");
+  }
+
+  function buildCoverCards(){
+    const track = document.getElementById("coverSwipeTrack");
+    const dots = document.getElementById("coverDots");
+    if(!track || !dots) return;
+    track.innerHTML = "";
+    dots.innerHTML = "";
+    coverState.exercises.forEach((ex, i)=>{
+      const card = document.createElement("div");
+      card.className = "cover-exercise-card";
+      card.innerHTML = `
+        <div class="cover-exercise-name">${ex.name}</div>
+        <div class="cover-exercise-muscle">${String(ex.muscle || "Workout").toUpperCase()}</div>
+        <div class="cover-exercise-target">${ex.sets || 0} sets · ${ex.targetReps || "8"} reps target</div>
+      `;
+      track.appendChild(card);
+      const dot = document.createElement("div");
+      dot.className = `cover-dot${i === coverState.exerciseIndex ? " active" : ""}`;
+      dots.appendChild(dot);
+    });
+    const title = document.getElementById("coverWorkoutName");
+    if(title){
+      const day = WORKOUT_PLAN[coverState.dayKey];
+      title.textContent = day ? `${day.label} ${day.title}` : "WORKOUT";
+    }
+  }
+
+  function renderCoverSets(index){
+    const container = document.getElementById("coverSetsLogged");
+    if(!container) return;
+    const sets = coverState.loggedSets[index] || [];
+    container.innerHTML = sets.map(set=>`<div class="cover-set-pill">${set.weight}kg × ${set.reps}</div>`).join("");
+  }
+
+  function updateCoverDisplay(){
+    const i = coverState.exerciseIndex;
+    if(!coverState.exercises[i]) return;
+    const track = document.getElementById("coverSwipeTrack");
+    if(track) track.style.transform = `translateX(-${i * 100}%)`;
+    const progress = document.getElementById("coverProgress");
+    if(progress) progress.textContent = `${i + 1} / ${coverState.exercises.length}`;
+    const weight = document.getElementById("coverWeight");
+    const reps = document.getElementById("coverReps");
+    if(weight) weight.textContent = coverState.currentWeight[i];
+    if(reps) reps.textContent = coverState.currentReps[i];
+    document.querySelectorAll(".cover-dot").forEach((dot, idx)=>dot.classList.toggle("active", idx === i));
+    renderCoverSets(i);
+  }
+
+  function persistCoverExercise(index, checked){
+    const ex = coverState.exercises[index];
+    if(!ex || !coverState.dayKey) return;
+    const wo = getWorkout(activeDate, coverState.dayKey);
+    if(!wo.exercises[ex.id]) wo.exercises[ex.id] = {};
+    wo.exercises[ex.id].weight = String(coverState.currentWeight[index]);
+    wo.exercises[ex.id].actualReps = String(coverState.currentReps[index]);
+    wo.exercises[ex.id].coverSets = (coverState.loggedSets[index] || []).map(set=>({
+      weight: set.weight,
+      reps: set.reps,
+      ts: set.ts || Date.now()
+    }));
+    if(typeof checked === "boolean") wo.exercises[ex.id].checked = checked;
+  }
+
+  function syncCoverSetsToSession(){
+    coverState.exercises.forEach((_ex, index)=>persistCoverExercise(index));
+  }
+
+  function stepperMarkup(value, options = {}){
+    const unit = options.unit ? `<span class="stepper-unit">${options.unit}</span>` : "";
+    const extra = options.inputId ? ` data-input-id="${options.inputId}"` : "";
+    const max = options.max != null ? ` data-max="${options.max}"` : "";
+    const min = options.min != null ? ` data-min="${options.min}"` : "";
+    const step = options.step != null ? ` data-step="${options.step}"` : "";
+    return `<div class="stepper-group"${extra}${step}${min}${max} data-value="${value}">
+      <button type="button" class="stepper-dec" ontouchstart="stepperAdjust(this, -1)" onclick="stepperAdjust(this, -1)">−</button>
+      <span class="stepper-val">${value}</span>
+      ${unit}
+      <button type="button" class="stepper-inc" ontouchstart="stepperAdjust(this, 1)" onclick="stepperAdjust(this, 1)">+</button>
+    </div>`;
+  }
+
+  function syncStepperInput(group){
+    const inputId = group.dataset.inputId;
+    if(!inputId) return;
+    const input = document.getElementById(inputId);
+    if(input) input.value = group.dataset.value || "";
+  }
+
+  window.stepperAdjust=function(btn, direction){
+    const group = btn.closest(".stepper-group");
+    if(!group) return;
+    const step = parseFloat(group.dataset.step || 1);
+    const min = parseFloat(group.dataset.min || 0);
+    const max = parseFloat(group.dataset.max || 9999);
+    let val = parseFloat(group.dataset.value || 0);
+    val = Math.min(max, Math.max(min, val + direction * step));
+    val = parseFloat((Math.round((val / step) * 1000) / 1000 * step).toFixed(4));
+    group.dataset.value = String(val);
+    const display = group.querySelector(".stepper-val");
+    if(display) display.textContent = String(val);
+    syncStepperInput(group);
+  };
+
+  function createEditRowMarkup(ex = {}, index = 0){
+    const sets = parseInt(ex.sets || 0, 10) || 0;
+    const reps = ex.reps || "12";
+    return `<div class="eer" data-index="${index}" draggable="true" ondragstart="startEditRowDrag(event)" ondragend="endEditRowDrag(event)" ondragover="onEditRowDragOver(event)" ondragleave="onEditRowDragLeave(event)" ondrop="onEditRowDrop(event)">
+      <span class="eed" title="Drag to reorder">⠿</span>
+      <input class="een" list="exercise-options" value="${ex.name || ""}" placeholder="Exercise name">
+      ${stepperMarkup(sets,{ step:1, min:0, max:10, unit:"sets" })}
+      <input class="eer2" value="${reps}" placeholder="Reps" style="width:56px">
+      <button class="edb" onclick="this.closest('.eer').remove(); refreshEditRowIndices()" title="Remove">🗑</button>
+    </div>`;
+  }
+
+  window.adjustWeight=function(delta){
+    const i = coverState.exerciseIndex;
+    if(!coverState.exercises[i]) return;
+    const next = Math.max(0, Math.round((Number(coverState.currentWeight[i] || 0) + delta) * 4) / 4);
+    coverState.currentWeight[i] = Number(next.toFixed(2));
+    persistCoverExercise(i);
+    updateCoverDisplay();
+  };
+
+  window.adjustReps=function(delta){
+    const i = coverState.exerciseIndex;
+    if(!coverState.exercises[i]) return;
+    coverState.currentReps[i] = Math.max(1, Number(coverState.currentReps[i] || 0) + delta);
+    persistCoverExercise(i);
+    updateCoverDisplay();
+  };
+
+  window.logCurrentSet=async function(){
+    const i = coverState.exerciseIndex;
+    const ex = coverState.exercises[i];
+    if(!ex || !coverState.dayKey) return;
+    coverState.loggedSets[i].push({ weight: coverState.currentWeight[i], reps: coverState.currentReps[i] });
+    persistCoverExercise(i, true);
+    renderCoverSets(i);
+    await saveData();
+    const btn = document.getElementById("coverLogBtn");
+    if(btn){
+      const original = btn.textContent;
+      btn.textContent = "✓ LOGGED";
+      btn.classList.add("logged");
+      setTimeout(()=>{
+        btn.textContent = original;
+        btn.classList.remove("logged");
+      }, 700);
+    }
+  };
+
+  window.coverNextExercise=function(){
+    if(coverState.exerciseIndex < coverState.exercises.length - 1){
+      coverState.exerciseIndex++;
+      updateCoverDisplay();
+    }
+  };
+
+  window.coverPrevExercise=function(){
+    if(coverState.exerciseIndex > 0){
+      coverState.exerciseIndex--;
+      updateCoverDisplay();
+    }
+  };
+
+  window.openCoverFinish=function(){
+    syncCoverSetsToSession();
+    if(coverState.dayKey) openQuickFinish(coverState.dayKey);
+  };
+
+  function initCoverSwipe(){
+    const container = document.getElementById("coverSwipeContainer");
+    if(!container || container.dataset.bound === "true") return;
+    container.dataset.bound = "true";
+    let startX = 0;
+    let startY = 0;
+    container.addEventListener("touchstart", e=>{
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+    }, { passive:true });
+    container.addEventListener("touchend", e=>{
+      const dx = e.changedTouches[0].clientX - startX;
+      const dy = e.changedTouches[0].clientY - startY;
+      if(Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40){
+        if(dx < 0) coverNextExercise();
+        else coverPrevExercise();
+      }
+    }, { passive:true });
+  }
+
+  window.navTo=function(section, btn){
+    if(section === "start"){
+      if(activeDay){
+        if(isCoverScreen()) initCoverPlayerForDay(activeDay);
+        else document.getElementById("day-panel")?.scrollIntoView({ behavior:"smooth", block:"start" });
+      } else {
+        openTodayWorkout();
+      }
+      setMobileSection("start");
+      return;
+    }
+    if(section === "settings"){
+      setMobileSection("home");
+      openSettings();
+      return;
+    }
+    setMobileSection(section);
+    const map = {
+      home: "mobile-home-section",
+      history: "mobile-history-section",
+      records: "mobile-records-section",
+      metrics: "mobile-metrics-section"
+    };
+    const target = document.getElementById(map[section] || "");
+    if(target) target.scrollIntoView({ behavior:"smooth", block:"start" });
+  };
+
+  window.selectRPE=function(btn, value){
+    document.querySelectorAll(".rpe-tile").forEach(tile=>tile.classList.remove("selected"));
+    btn.classList.add("selected");
+    selectedRPE = value;
+    const input = document.getElementById("qfm-rpe");
+    if(input) input.value = value;
+  };
+
+  window.selectPain=function(btn, value){
+    document.querySelectorAll(".pain-pill").forEach(tile=>tile.classList.remove("selected"));
+    btn.classList.add("selected");
+    selectedPain = value;
+    const input = document.getElementById("qfm-pain-level");
+    if(input) input.value = value;
+  };
 
   // ─── HELPERS ───
   function getWorkout(date,key){
@@ -2015,7 +2363,7 @@
 
       h+=`<button class="donebtn ${wo.done?'da':''}" style="--c:${day.color}" onclick="markDone('${key}')">${wo.done?'✓ COMPLETED':'MARK AS DONE'}</button>`;
     }
-    panel.innerHTML=h; panel.style.display="block"; updateTimerBtns();
+    panel.innerHTML=h; panel.style.display="block"; updateTimerBtns(); syncWorkoutFocusState();
   }
 
   // ── Per-participant bodyweight ──
@@ -2173,6 +2521,14 @@
     document.getElementById("qfm-pain-level").value=sm.painLevel||"none";
     document.getElementById("qfm-pain-area").value=sm.painArea||"";
     document.getElementById("qfm-note").value=sm.finishNote||"";
+    selectedRPE = sm.rpe || null;
+    selectedPain = sm.painLevel || "none";
+    document.querySelectorAll(".rpe-tile").forEach(tile=>{
+      tile.classList.toggle("selected", Number(tile.dataset.value) === Number(selectedRPE));
+    });
+    document.querySelectorAll(".pain-pill").forEach(tile=>{
+      tile.classList.toggle("selected", tile.dataset.value === selectedPain);
+    });
     m.style.display="flex";
   };
   window.closeQuickFinish=function(){
@@ -2184,8 +2540,8 @@
     const key=m?.dataset?.key;
     if(!key) return;
     const wo=getWorkout(activeDate,key);
-    const rpe=parseFloat(document.getElementById("qfm-rpe")?.value||0);
-    const painLevel=(document.getElementById("qfm-pain-level")?.value||"none").trim();
+    const rpe=parseFloat(document.getElementById("qfm-rpe")?.value||selectedRPE||0);
+    const painLevel=(document.getElementById("qfm-pain-level")?.value||selectedPain||"none").trim();
     const painArea=(document.getElementById("qfm-pain-area")?.value||"").trim();
     const finishNote=(document.getElementById("qfm-note")?.value||"").trim();
     wo.sessionMeta={
@@ -2256,6 +2612,7 @@
       panel.innerHTML=h_content;
     }
     panel.style.display="block";
+    syncWorkoutFocusState();
   }
 
   // ─── ACTIONS ───
@@ -2278,6 +2635,8 @@
   window.selectDate=function(ds){
     activeDate=ds; activeDay=null;
     document.querySelectorAll(".day-card").forEach(c=>c.classList.remove("active"));
+    syncWorkoutFocusState();
+    hideCoverPlayer();
     renderCalendar(); renderDateSummary(ds);
   };
   window.selectDay=function(key){
@@ -2285,6 +2644,8 @@
     document.querySelectorAll(".day-card").forEach(c=>c.classList.remove("active"));
     document.getElementById(`card-${key}`)?.classList.add("active");
     renderDayPanel(key);
+    setMobileSection(isCoverScreen() ? "start" : "home");
+    if(isCoverScreen()) initCoverPlayerForDay(key);
   };
   window.togEx=async function(key,exName,checked){
     const wo=getWorkout(activeDate,key);
@@ -2337,6 +2698,7 @@
       // Haptic feedback and confetti for completing workouts
       hapticFeedback([100, 50, 100]);
       showConfetti();
+      hideCoverPlayer();
     }
     const sy=window.scrollY; renderDayPanel(key); renderStats(); renderCharts(); renderCalendar(); window.scrollTo(0,sy);
     await saveData(); if(wo.done)toast("💪 WORKOUT LOGGED");
@@ -2510,7 +2872,7 @@
       </div>
     </div><div id="eel">`;
     day.exercises.forEach((ex,i)=>{
-      h+=`<div class="eer" data-index="${i}"><span class="eed">⠿</span><input class="een" list="exercise-options" value="${ex.name}" placeholder="Exercise name"><input class="ees" type="number" value="${ex.sets||''}" placeholder="Sets" min="0" max="10" style="width:52px"><span style="color:#555;font-size:.8rem">×</span><input class="eer2" value="${ex.reps}" placeholder="Reps" style="width:56px"><button class="emv" onclick="moveExercise(${i},-1)" title="Move up">▲</button><button class="emv" onclick="moveExercise(${i},1)" title="Move down">▼</button><button class="edb" onclick="this.closest('.eer').remove()">🗑</button></div>`;
+      h+=createEditRowMarkup(ex, i);
     });
     h+=`</div><button class="eab" onclick="addEditRow()" style="border-color:${day.color};color:${day.color}">+ ADD EXERCISE</button>`;
     if(canManageWorkoutParticipants()){
@@ -2522,14 +2884,14 @@
     document.getElementById("emb").innerHTML=h;
     document.getElementById("em").style.display="flex";
     document.getElementById("em").dataset.key=key;
+    refreshEditRowIndices();
     closeCardMenu();
   };
   window.closeEdit=()=>document.getElementById("em").style.display="none";
   window.addEditRow=function(){
     const l=document.getElementById("eel"); const rows=l.querySelectorAll(".eer").length;
-    const d=document.createElement("div"); d.className="eer"; d.setAttribute("data-index",rows);
-    d.innerHTML=`<span class="eed">⠿</span><input class="een" list="exercise-options" placeholder="Exercise name"><input class="ees" type="number" placeholder="Sets" min="0" max="10" style="width:52px"><span style="color:#555;font-size:.8rem">×</span><input class="eer2" placeholder="Reps" style="width:56px"><button class="emv" onclick="moveExercise(${rows},-1)" title="Move up">▲</button><button class="emv" onclick="moveExercise(${rows},1)" title="Move down">▼</button><button class="edb" onclick="this.closest('.eer').remove()">🗑</button>`;
-    l.appendChild(d);
+    l.insertAdjacentHTML("beforeend", createEditRowMarkup({}, rows));
+    refreshEditRowIndices();
   };
   window.moveExercise=function(index,dir){
     const l=document.getElementById("eel");
@@ -2540,6 +2902,49 @@
     if(newIndex<0||newIndex>=rows.length) return;
     if(dir<0) l.insertBefore(currentRow,rows[newIndex]);
     else l.insertBefore(rows[newIndex],currentRow);
+    refreshEditRowIndices();
+  };
+  let dragEditRow = null;
+  window.refreshEditRowIndices=function(){
+    document.querySelectorAll("#eel .eer").forEach((row, index)=>{
+      row.dataset.index = String(index);
+    });
+  };
+  window.startEditRowDrag=function(e){
+    dragEditRow = e.currentTarget;
+    if(e.dataTransfer){
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", e.currentTarget.dataset.index || "0");
+    }
+    e.currentTarget.classList.add("dragging");
+  };
+  window.endEditRowDrag=function(e){
+    e.currentTarget.classList.remove("dragging");
+    document.querySelectorAll("#eel .eer.drag-over").forEach(row=>row.classList.remove("drag-over"));
+    dragEditRow = null;
+  };
+  window.onEditRowDragOver=function(e){
+    e.preventDefault();
+    const row = e.currentTarget;
+    document.querySelectorAll("#eel .eer.drag-over").forEach(item=>{ if(item!==row) item.classList.remove("drag-over"); });
+    row.classList.add("drag-over");
+  };
+  window.onEditRowDragLeave=function(e){
+    e.currentTarget.classList.remove("drag-over");
+  };
+  window.onEditRowDrop=function(e){
+    e.preventDefault();
+    const targetRow = e.currentTarget;
+    targetRow.classList.remove("drag-over");
+    if(!dragEditRow || dragEditRow === targetRow) return;
+    const list = document.getElementById("eel");
+    const rows = Array.from(list.querySelectorAll(".eer"));
+    const fromIndex = rows.indexOf(dragEditRow);
+    const toIndex = rows.indexOf(targetRow);
+    if(fromIndex < 0 || toIndex < 0) return;
+    if(fromIndex < toIndex) list.insertBefore(dragEditRow, targetRow.nextSibling);
+    else list.insertBefore(dragEditRow, targetRow);
+    refreshEditRowIndices();
   };
   window.saveEdit=async function(){
     const key=document.getElementById("em").dataset.key;
@@ -2557,7 +2962,7 @@
       WORKOUT_PLAN[key].participants=hasBronwen?['revan','bronwen']:['revan'];
     }
     const rows=document.querySelectorAll("#eel .eer"), newEx=[];
-    rows.forEach(r=>{ const n=r.querySelector(".een").value.trim(); const s=parseInt(r.querySelector(".ees").value)||0; const rp=r.querySelector(".eer2").value.trim()||"12"; if(n)newEx.push({name:n,sets:s,reps:rp}); });
+    rows.forEach(r=>{ const n=r.querySelector(".een").value.trim(); const s=parseInt(r.querySelector(".stepper-group")?.dataset.value||0,10)||0; const rp=r.querySelector(".eer2").value.trim()||"12"; if(n)newEx.push({name:n,sets:s,reps:rp}); });
     WORKOUT_PLAN[key].exercises=newEx; closeEdit();
     if(activeDay===key)renderDayPanel(key);
     await saveData(); toast("✓ WORKOUT UPDATED"); renderDayGrid();
@@ -2735,6 +3140,8 @@
 
     document.getElementById("swt").textContent=`SWAP: ${ex.name}`; document.getElementById("swt").style.color=WORKOUT_PLAN[key].color;
     document.getElementById("swn").value=""; document.getElementById("sws").value=ex.sets||""; document.getElementById("swr").value=ex.reps||"";
+    const swapStepper = document.getElementById("swap-stepper-root");
+    if(swapStepper) swapStepper.innerHTML = stepperMarkup(ex.sets || 0, { step:1, min:0, max:10, unit:"sets", inputId:"sws" });
     document.getElementById("swm").style.display="flex"; document.getElementById("swm").dataset.key=key; document.getElementById("swm").dataset.i=i;
 
     // Populate suggestions
@@ -2792,7 +3199,7 @@
   window.confirmSwap=async function(){
     const m=document.getElementById("swm"),key=m.dataset.key,i=parseInt(m.dataset.i);
     const n=document.getElementById("swn").value.trim(); if(!n){toast("⚠️ Enter name");return;}
-    const s=parseInt(document.getElementById("sws").value)||3, r=document.getElementById("swr").value.trim()||"12";
+    const s=parseInt(document.querySelector("#swap-stepper-root .stepper-group")?.dataset.value||document.getElementById("sws").value,10)||3, r=document.getElementById("swr").value.trim()||"12";
     WORKOUT_PLAN[key].exercises[i]={name:n,sets:s,reps:r}; closeSwap(); renderDayPanel(key); await saveData(); toast(`✓ Swapped to ${n}`);
   };
 
@@ -3540,6 +3947,15 @@
 
   // ─── INIT ───
   window.addEventListener("DOMContentLoaded",()=>{
+    document.addEventListener("gesturestart", e=>e.preventDefault(), { passive:false });
+    document.addEventListener("gesturechange", e=>e.preventDefault(), { passive:false });
+    document.addEventListener("gestureend", e=>e.preventDefault(), { passive:false });
+    let lastTouchEnd = 0;
+    document.addEventListener("touchend", e=>{
+      const now = Date.now();
+      if(now - lastTouchEnd <= 300) e.preventDefault();
+      lastTouchEnd = now;
+    }, { passive:false });
     const th=localStorage.getItem("ironlog_theme");
     if(th==="light")document.documentElement.classList.add("light-mode");
     try{
@@ -3563,9 +3979,14 @@
     try{ notificationsSeen=JSON.parse(localStorage.getItem(`ironlog_notif_seen_${activeProfile}`)||"{}")||{}; }catch(_e){ notificationsSeen={}; }
     renderAppVersion();
     updateLogoColor(); updateClock(); setInterval(updateClock,1000);
+    applyScreenMode();
+    setMobileSection("home");
+    initCoverSwipe();
     initSwipeGestures(); // Initialize swipe gestures for mobile
     initAuthGate();
     initSectionStates();
+    syncBottomNavState();
+    window.addEventListener("resize", handleScreenChange);
   });
 </script>
 
@@ -3574,12 +3995,15 @@
 :root{--bg:#0a0a0a;--bg2:#111;--bg3:#181818;--bg4:#1f1f1f;--border:#282828;--text:#e8e8e8;--muted:#606060;--accent:#e85d04;--shadow:0 12px 40px rgba(0,0,0,.4);--hm-empty:rgba(255,255,255,0.055);--radius:6px}
 html.light-mode{--bg:#f0f0ee;--bg2:#e5e5e2;--bg3:#d9d9d6;--bg4:#cfcfcc;--border:#bdbdba;--text:#111;--muted:#888;--accent:#e85d04;--shadow:0 12px 40px rgba(0,0,0,.1);--hm-empty:rgba(0,0,0,0.06);--radius:6px}
 html{background:var(--bg);color:var(--text);font-family:'Barlow',sans-serif}
-body{min-height:100vh;background:var(--bg);background-image:repeating-linear-gradient(0deg,transparent,transparent 40px,rgba(255,255,255,0.01) 40px,rgba(255,255,255,0.01) 41px),repeating-linear-gradient(90deg,transparent,transparent 40px,rgba(255,255,255,0.01) 40px,rgba(255,255,255,0.01) 41px);line-height:1.3}
+body{min-height:100vh;background:var(--bg);background-image:repeating-linear-gradient(0deg,transparent,transparent 40px,rgba(255,255,255,0.01) 40px,rgba(255,255,255,0.01) 41px),repeating-linear-gradient(90deg,transparent,transparent 40px,rgba(255,255,255,0.01) 40px,rgba(255,255,255,0.01) 41px);line-height:1.3;overscroll-behavior:none;-webkit-overflow-scrolling:touch}
 html.light-mode body{background-image:repeating-linear-gradient(0deg,transparent,transparent 40px,rgba(0,0,0,0.02) 40px,rgba(0,0,0,0.02) 41px),repeating-linear-gradient(90deg,transparent,transparent 40px,rgba(0,0,0,0.02) 40px,rgba(0,0,0,0.02) 41px)}
 @media(max-width:680px){:root{--bg:#111;--bg2:#171717;--bg3:#1e1e1e;--bg4:#252525;--border:#303030}}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--border)}
 button,input,select,textarea{font:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+*,*::before,*::after{-webkit-tap-highlight-color:transparent}
+.safe-bottom{padding-bottom:env(safe-area-inset-bottom,16px)}
+.safe-top{padding-top:env(safe-area-inset-top,0)}
 
 /* HEADER */
 .hdr{display:flex;justify-content:space-between;align-items:center;padding:11px 20px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;gap:12px}
@@ -4016,7 +4440,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .mcb:hover{color:var(--text)}
 #emb,.mbd{padding:11px 15px;max-height:58vh;overflow-y:auto}
 .eer{display:flex;align-items:center;gap:7px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.05)}
-.eed{color:var(--muted)}
+.eed{color:var(--muted);cursor:grab;padding:8px;touch-action:none;user-select:none;-webkit-user-select:none}
 .een,.ees,.eer2{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 9px;outline:none;font-family:'Barlow',sans-serif;font-size:.88rem}
 .een{flex:1;min-width:0}
 .ees,.eer2{font-family:'Barlow Condensed',sans-serif;text-align:center}
@@ -4025,6 +4449,7 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .eab{margin-top:9px;border:1px solid var(--border);background:transparent;color:var(--text);padding:8px 11px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em}
 .emv{width:28px;height:28px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:.7rem}
 .emv:hover{background:var(--bg3);color:var(--text)}
+.eer.drag-over{border-top:2px solid var(--accent)}
 .mft{display:flex;gap:7px;justify-content:flex-end;padding:9px 15px;border-top:1px solid var(--border)}
 .mcc,.msc{padding:8px 11px;border:1px solid var(--border);cursor:pointer;font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;font-size:.82rem}
 .mcc{background:transparent;color:var(--muted)}
@@ -4038,10 +4463,63 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 .fi:focus{border-color:var(--accent)}
 .fi::placeholder{color:#7a7a7a}
 .fsel{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:'Barlow Condensed',sans-serif;font-size:.88rem;padding:8px 10px;border-radius:var(--radius)}
+.stepper-group{display:flex;align-items:center;background:rgba(255,255,255,.07);border-radius:14px;overflow:hidden;user-select:none;-webkit-user-select:none}
+.stepper-dec,.stepper-inc{width:42px;height:42px;background:transparent;border:none;font-size:1.3rem;font-weight:300;color:inherit;display:flex;align-items:center;justify-content:center}
+.stepper-dec:active,.stepper-inc:active{background:rgba(255,255,255,.1)}
+.stepper-val{min-width:32px;text-align:center;font-family:'Barlow Condensed',sans-serif;font-size:1.1rem;font-weight:900}
+.stepper-unit{font-size:.68rem;opacity:.45;padding:0 10px 0 4px;text-transform:uppercase;letter-spacing:.08em}
 
 /* TOAST */
 #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--bg4);border:1px solid var(--border);padding:8px 13px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.12em;font-size:.82rem;opacity:0;transition:opacity .2s;z-index:500;max-width:min(92vw,560px);white-space:normal;text-align:center;border-radius:var(--radius)}
 #toast.show{opacity:1}
+
+/* MOBILE REDESIGN */
+#coverWorkoutPlayer{position:fixed;inset:0;display:none;flex-direction:column;background:linear-gradient(180deg,rgba(17,17,17,.98),rgba(10,10,10,1));color:var(--text);z-index:1400;overflow:hidden;padding-top:env(safe-area-inset-top,0)}
+.cover-topbar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px 8px;border-bottom:1px solid rgba(255,255,255,.08);flex-shrink:0}
+.cover-workout-name{font-size:.82rem;font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.14em;opacity:.72}
+.cover-progress{font-size:.74rem;letter-spacing:.08em;opacity:.55}
+.cover-swipe-container{flex:1;overflow:hidden;position:relative}
+.cover-swipe-track{display:flex;height:100%;transition:transform .3s cubic-bezier(.25,.46,.45,.94);will-change:transform}
+.cover-exercise-card{min-width:100%;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;text-align:center;gap:8px;flex-shrink:0}
+.cover-exercise-name{font-family:'Barlow Condensed',sans-serif;font-size:2rem;font-weight:900;letter-spacing:.05em;line-height:1}
+.cover-exercise-muscle{font-size:.74rem;letter-spacing:.14em;opacity:.45}
+.cover-exercise-target{font-size:.88rem;opacity:.66}
+.cover-dots{display:flex;justify-content:center;gap:6px;padding:8px 0 4px;flex-shrink:0}
+.cover-dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.2);transition:background .2s,transform .2s}
+.cover-dot.active{background:var(--accent);transform:scale(1.35)}
+.cover-input-area{display:flex;gap:8px;padding:8px 12px;flex-shrink:0}
+.cover-input-group{flex:1;display:flex;align-items:center;background:rgba(255,255,255,.06);border-radius:14px;overflow:hidden}
+.cover-stepper-btn,.cover-nav-btn,.cover-finish-btn,.cover-log-btn,.bnav-item,.rpe-tile,.pain-pill{touch-action:manipulation}
+.cover-stepper-btn{width:52px;height:52px;border:none;background:transparent;color:inherit;font-size:1.4rem}
+.cover-input-display{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.cover-input-value{font-family:'Barlow Condensed',sans-serif;font-size:1.45rem;font-weight:900}
+.cover-input-unit{font-size:.64rem;letter-spacing:.1em;opacity:.5;text-transform:uppercase}
+.cover-log-btn{margin:6px 12px;height:54px;background:var(--accent);color:#fff;border:none;border-radius:14px;font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:900;letter-spacing:.14em;flex-shrink:0}
+.cover-log-btn.logged{background:#22c55e}
+.cover-sets-logged{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 8px;min-height:34px;justify-content:center;flex-shrink:0}
+.cover-set-pill{background:rgba(255,255,255,.1);border-radius:999px;padding:4px 10px;font-size:.74rem;font-weight:700}
+.cover-bottombar{display:flex;gap:8px;padding:8px 12px;border-top:1px solid rgba(255,255,255,.07);flex-shrink:0}
+.cover-nav-btn,.cover-finish-btn{height:48px;border-radius:12px;border:none;color:inherit;font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.12em}
+.cover-nav-btn{flex:1;background:rgba(255,255,255,.08)}
+.cover-finish-btn{flex:1.1;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.15)}
+.bottom-nav{display:none;position:fixed;left:0;right:0;bottom:0;height:calc(60px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);background:rgba(17,17,17,.96);backdrop-filter:blur(12px);border-top:1px solid rgba(255,255,255,.07);z-index:1200;align-items:stretch}
+.bnav-item{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:transparent;border:none;color:rgba(255,255,255,.42);padding:0}
+.bnav-item.active{color:var(--accent)}
+.bnav-icon{font-size:1.15rem;line-height:1}
+.bnav-label{font-size:.58rem;font-family:'Barlow Condensed',sans-serif;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.bnav-center{position:relative;top:-14px;flex:0 0 64px;width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;box-shadow:0 4px 16px rgba(232,93,4,.35)}
+.bnav-center .bnav-label{display:none}
+.mobile-section{scroll-margin-top:80px}
+.rpe-tiles{display:none}
+.pain-options{display:flex;gap:8px;flex-wrap:wrap}
+.pain-pill{flex:1;min-width:70px;height:44px;border-radius:22px;border:1px solid rgba(255,255,255,.15);background:transparent;color:inherit;font-family:'Barlow Condensed',sans-serif;font-size:.76rem;font-weight:700}
+.pain-pill.selected{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.4)}
+.rpe-tile{height:48px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:transparent;color:inherit;font-family:'Barlow Condensed',sans-serif;font-size:.92rem;font-weight:900}
+.rpe-tile.selected{background:var(--accent);border-color:transparent;color:#111}
+body[data-cover-player="active"] .bottom-nav{display:none!important}
+body[data-cover-player="active"] #mainApp,body[data-cover-player="active"] #sto,body[data-cover-player="active"] #stp,body[data-cover-player="active"] #notif-panel{display:none!important}
+body[data-cover-player="active"] #coverWorkoutPlayer{display:flex}
+body[data-cover-player="active"] .hdr{display:none}
 
 /* MOBILE */
 @media(max-width:680px){
@@ -4062,6 +4540,29 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   .pcol .eck{order:-1}
   .st-ab{min-height:38px}
   .sec{font-size:.8rem}
+  .bottom-nav{display:flex}
+  body{padding-bottom:calc(60px + env(safe-area-inset-bottom))}
+  body.exercise-focus .mobile-hide-when-focus{display:none}
+  body.exercise-focus #day-panel{position:relative;min-height:calc(100dvh - 88px - env(safe-area-inset-bottom));margin-top:0}
+  body[data-mobile-section="home"] #mobile-history-section,
+  body[data-mobile-section="home"] #mobile-records-section,
+  body[data-mobile-section="home"] #mobile-metrics-section,
+  body[data-mobile-section="home"] #mobile-metrics-extra{display:none}
+  body[data-mobile-section="history"] #mobile-home-section,
+  body[data-mobile-section="history"] #mobile-records-section,
+  body[data-mobile-section="history"] #mobile-metrics-section,
+  body[data-mobile-section="history"] #mobile-metrics-extra{display:none}
+  body[data-mobile-section="records"] #mobile-home-section,
+  body[data-mobile-section="records"] #mobile-history-section,
+  body[data-mobile-section="records"] #mobile-metrics-section,
+  body[data-mobile-section="records"] #mobile-metrics-extra{display:none}
+  body[data-mobile-section="metrics"] #mobile-home-section,
+  body[data-mobile-section="metrics"] #mobile-history-section,
+  body[data-mobile-section="metrics"] #mobile-records-section{display:none}
+  #qfm .mbox,#em .mbox,#svm .mbox,#adm .mbox,#swm .mbox,#exercise-history-modal .mbox{width:100vw;max-width:100vw;min-height:100dvh;margin:0;border-radius:0}
+  body[data-screen="cover"] #qfm{padding:12px 10px 16px}
+  body[data-screen="cover"] #qfm .mbox{min-height:100dvh}
+  body[data-screen="cover"] .rpe-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
 }
 
 @media (prefers-reduced-motion: reduce){
@@ -4153,11 +4654,47 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <button class="hdr-icn-btn" onclick="openSettings()" title="Settings">☰</button>
   </div>
 </div>
+<div id="coverWorkoutPlayer">
+  <div class="cover-topbar">
+    <div class="cover-workout-name" id="coverWorkoutName">WORKOUT</div>
+    <div class="cover-progress" id="coverProgress">1 / 1</div>
+  </div>
+  <div class="cover-swipe-container safe-top" id="coverSwipeContainer">
+    <div class="cover-swipe-track" id="coverSwipeTrack"></div>
+  </div>
+  <div class="cover-dots" id="coverDots"></div>
+  <div class="cover-input-area">
+    <div class="cover-input-group">
+      <button class="cover-stepper-btn" ontouchstart="adjustWeight(-2.5)" onclick="adjustWeight(-2.5)">−</button>
+      <div class="cover-input-display">
+        <span class="cover-input-value" id="coverWeight">20</span>
+        <span class="cover-input-unit">kg</span>
+      </div>
+      <button class="cover-stepper-btn" ontouchstart="adjustWeight(2.5)" onclick="adjustWeight(2.5)">+</button>
+    </div>
+    <div class="cover-input-group">
+      <button class="cover-stepper-btn" ontouchstart="adjustReps(-1)" onclick="adjustReps(-1)">−</button>
+      <div class="cover-input-display">
+        <span class="cover-input-value" id="coverReps">8</span>
+        <span class="cover-input-unit">reps</span>
+      </div>
+      <button class="cover-stepper-btn" ontouchstart="adjustReps(1)" onclick="adjustReps(1)">+</button>
+    </div>
+  </div>
+  <button class="cover-log-btn" id="coverLogBtn" ontouchstart="logCurrentSet()" onclick="logCurrentSet()">✓ LOG SET</button>
+  <div class="cover-sets-logged" id="coverSetsLogged"></div>
+  <div class="cover-bottombar safe-bottom">
+    <button class="cover-nav-btn" ontouchstart="coverPrevExercise()" onclick="coverPrevExercise()">‹ PREV</button>
+    <button class="cover-finish-btn" ontouchstart="openCoverFinish()" onclick="openCoverFinish()">FINISH</button>
+    <button class="cover-nav-btn" ontouchstart="coverNextExercise()" onclick="coverNextExercise()">NEXT ›</button>
+  </div>
+</div>
 <div id="notif-panel">
   <div class="noti-head">NOTIFICATIONS</div>
   <div id="notif-list"></div>
 </div>
 
+<div id="mainApp">
 <!-- STATS -->
 <div class="sbar">
   <div class="stat" onclick="focusStat('days')" title="Jump to calendar"><div class="sn" id="stat-days">0</div><div class="sl">DAYS / MONTH</div></div>
@@ -4167,6 +4704,8 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 </div>
 
 <div class="main">
+  <div id="mobile-home-section" class="mobile-section">
+  <div class="mobile-hide-when-focus">
   <div class="qbar">
     <button class="st-ab qbtn" onclick="openTodayWorkout()">▶ START TODAY</button>
     <button class="st-ab qbtn" onclick="openAddWorkoutQuick()">＋ ADD WORKOUT</button>
@@ -4186,9 +4725,12 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
       <div><div class="rbt">REST DAY</div><div class="rbs">Recovery · Mobility · Walk</div></div>
     </div>
   </div>
+  </div>
 
   <div id="day-panel" style="display:none"></div>
+  </div>
 
+  <div id="mobile-history-section" class="mobile-section">
   <div class="sec-toggle" onclick="toggleSection('calendar')">
     <span class="sec-sub">HISTORY</span>
     <button id="btn-calendar" class="sec-btn">▼ CALENDAR</button>
@@ -4201,7 +4743,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     </div>
     <div id="calendar"></div>
   </div>
+  </div>
 
+  <div id="mobile-metrics-section" class="mobile-section">
   <div class="sec-toggle" onclick="toggleSection('health')">
     <span class="sec-sub">METRICS</span>
     <button id="btn-health" class="sec-btn">▼ DAILY HEALTH</button>
@@ -4209,7 +4753,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   <div id="sec-health-content" class="sec-content">
     <div id="health-checklist"></div>
   </div>
+  </div>
 
+  <div id="mobile-records-section" class="mobile-section">
   <div class="sec-toggle" onclick="toggleSection('pr')">
     <span class="sec-sub">RECORDS</span>
     <button id="btn-pr" class="sec-btn">▼ PERSONAL RECORDS</button>
@@ -4217,7 +4763,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
   <div id="sec-pr-content" class="sec-content">
     <div id="pr-wall"></div>
   </div>
+  </div>
 
+  <div id="mobile-metrics-extra">
   <div class="sec" style="margin-bottom:0;display:none">// DASHBOARD</div>
   <div class="db-toggle" onclick="toggleDashboard()">
     <span style="font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.78rem;color:var(--muted)">THIS MONTH · ACTIVITY</span>
@@ -4248,6 +4796,8 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
     <button class="nav-btn" onclick="navigateToGym()">🗺 NAVIGATE TO GYM</button>
     <button class="nav-rst" onclick="resetGymUrl()">CLEAR SAVED GYM URL</button>
   </div>
+  </div>
+</div>
 </div>
 
 <!-- SETTINGS -->
@@ -4396,8 +4946,9 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
       <input id="swn" class="fi" placeholder="New exercise name (or choose from suggestions below)">
       <div id="swsuggestions" class="sw-suggestions-container"></div>
       <div style="display:flex;gap:7px;align-items:center">
-        <input id="sws" type="number" class="fi" placeholder="Sets" min="0" max="10" style="width:68px">
-        <span style="color:var(--muted);font-size:.82rem">sets ×</span>
+        <input id="sws" type="hidden" value="3">
+        <div id="swap-stepper-root" style="min-width:148px"></div>
+        <span style="color:var(--muted);font-size:.82rem">×</span>
         <input id="swr" class="fi" placeholder="Reps" style="width:68px">
         <span style="color:var(--muted);font-size:.82rem">reps</span>
       </div>
@@ -4420,6 +4971,13 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
       <div>
         <div class="fl">SESSION RPE (1-10)</div>
         <input id="qfm-rpe" class="fi" type="number" min="1" max="10" step="0.5" placeholder="e.g. 8.5">
+        <div class="rpe-tiles" style="margin-top:8px">
+          <button class="rpe-tile" data-value="6" ontouchstart="selectRPE(this, 6)" onclick="selectRPE(this, 6)">6</button>
+          <button class="rpe-tile" data-value="7" ontouchstart="selectRPE(this, 7)" onclick="selectRPE(this, 7)">7</button>
+          <button class="rpe-tile" data-value="8" ontouchstart="selectRPE(this, 8)" onclick="selectRPE(this, 8)">8</button>
+          <button class="rpe-tile" data-value="9" ontouchstart="selectRPE(this, 9)" onclick="selectRPE(this, 9)">9</button>
+          <button class="rpe-tile" data-value="10" ontouchstart="selectRPE(this, 10)" onclick="selectRPE(this, 10)">10</button>
+        </div>
       </div>
       <div>
         <div class="fl">PAIN FLAG</div>
@@ -4429,6 +4987,12 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
           <option value="moderate">Moderate</option>
           <option value="severe">Severe</option>
         </select>
+        <div class="pain-options" style="margin-top:8px">
+          <button class="pain-pill" data-value="none" ontouchstart="selectPain(this, 'none')" onclick="selectPain(this, 'none')">None</button>
+          <button class="pain-pill" data-value="mild" ontouchstart="selectPain(this, 'mild')" onclick="selectPain(this, 'mild')">Mild</button>
+          <button class="pain-pill" data-value="moderate" ontouchstart="selectPain(this, 'moderate')" onclick="selectPain(this, 'moderate')">Moderate</button>
+          <button class="pain-pill" data-value="severe" ontouchstart="selectPain(this, 'severe')" onclick="selectPain(this, 'severe')">Severe</button>
+        </div>
       </div>
       <div>
         <div class="fl">PAIN AREA (optional)</div>
@@ -4464,5 +5028,27 @@ html.light-mode .cal-cell.skipped{background:#fae8e8}
 <datalist id="exercise-options"></datalist>
 <div id="confetti-container"></div>
 <div id="toast"></div>
+<nav class="bottom-nav" id="bottomNav" role="navigation" aria-label="Main navigation">
+  <button class="bnav-item active" data-section="home" ontouchstart="navTo('home', this)" onclick="navTo('home', this)">
+    <span class="bnav-icon">🏠</span>
+    <span class="bnav-label">Home</span>
+  </button>
+  <button class="bnav-item" data-section="history" ontouchstart="navTo('history', this)" onclick="navTo('history', this)">
+    <span class="bnav-icon">📅</span>
+    <span class="bnav-label">History</span>
+  </button>
+  <button class="bnav-item bnav-center" data-section="start" ontouchstart="navTo('start', this)" onclick="navTo('start', this)">
+    <span class="bnav-icon">▶</span>
+    <span class="bnav-label">Start</span>
+  </button>
+  <button class="bnav-item" data-section="records" ontouchstart="navTo('records', this)" onclick="navTo('records', this)">
+    <span class="bnav-icon">🏆</span>
+    <span class="bnav-label">Records</span>
+  </button>
+  <button class="bnav-item" data-section="metrics" ontouchstart="navTo('metrics', this)" onclick="navTo('metrics', this)">
+    <span class="bnav-icon">📈</span>
+    <span class="bnav-label">Metrics</span>
+  </button>
+</nav>
 </body>
 </html>
