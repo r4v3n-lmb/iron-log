@@ -28,7 +28,7 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.0.31";
+  const APP_VERSION = "v1.1.31";
 
   // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
   const DEFAULT_PLAN = {
@@ -237,6 +237,7 @@
     if(!PROFILES[pk]) return;
     activeProfile=pk;
     localStorage.setItem("ironlog_profile",pk);
+    normalizeHealthStore();
     try{ notificationsSeen=JSON.parse(localStorage.getItem(`ironlog_notif_seen_${activeProfile}`)||"{}")||{}; }catch(_e){ notificationsSeen={}; }
     document.body.classList.remove("auth-locked");
     const gate=document.getElementById("auth-gate");
@@ -244,6 +245,7 @@
     updateLogoColor();
     renderSettingsProfiles();
     await loadData();
+    renderProfileShell();
     toast(`👤 ${PROFILES[pk].label}`);
   }
   window.signInAccount=async function(){
@@ -1287,7 +1289,8 @@
   }
   function getSleepHistory(){
     const p=getMonthKey(),r=[];
-    Object.keys(state.health||{}).sort().forEach(d=>{ if(d.startsWith(p))r.push({date:d,sleep:state.health[d]?.sleep||0,label:d.slice(5)}); });
+    const healthBucket = getHealthBucket(activeProfile);
+    Object.keys(healthBucket||{}).sort().forEach(d=>{ if(d.startsWith(p))r.push({date:d,sleep:healthBucket[d]?.sleep||0,label:d.slice(5)}); });
     return r;
   }
   function getMuscleGroup(exerciseName){
@@ -1441,7 +1444,7 @@
     for(let i=0;i<4;i++){
       const d=new Date(today); d.setDate(today.getDate()-i);
       const ds=d.toISOString().split("T")[0];
-      const h=state.health?.[ds];
+      const h=ensureHealthEntry(ds, activeProfile);
       if(h) recent.push(h);
     }
     if(recent.length<2) return false;
@@ -1671,24 +1674,39 @@
 
   function getRecentDashboardSessions(limit=3){
     const items = [];
+    const pushSession = (ds, key, wo, day, owner=activeProfile)=>{
+      const hasExercises = !!Object.keys(wo?.exercises || {}).length;
+      const hasSessionMeta = !!(wo?.sessionMeta?.startAt || wo?.sessionMeta?.rpe || wo?.sessionMeta?.durationMins);
+      if(!day || (!sessionHasLoggedActivity(wo) && !wo?.done && !hasExercises && !hasSessionMeta)) return;
+      const checkedCount = Object.values(wo?.exercises || {}).filter(entry=>entry?.checked).length;
+      items.push({
+        date: ds,
+        key,
+        wo,
+        day,
+        owner,
+        tonnage: calcSessionTonnage(ds, key),
+        checkedCount
+      });
+    };
+    const ownPlan = state.allUserWorkouts?.[activeProfile]?.plan || WORKOUT_PLAN;
     Object.keys(state.workouts || {}).forEach(ds=>{
       Object.keys(state.workouts[ds] || {}).forEach(key=>{
-        const wo = state.workouts[ds][key];
-        const day = WORKOUT_PLAN[key];
-        const hasExercises = !!Object.keys(wo?.exercises || {}).length;
-        const hasSessionMeta = !!(wo?.sessionMeta?.startAt || wo?.sessionMeta?.rpe || wo?.sessionMeta?.durationMins);
-        if(!day || (!sessionHasLoggedActivity(wo) && !wo?.done && !hasExercises && !hasSessionMeta)) return;
-        const checkedCount = Object.values(wo.exercises || {}).filter(entry=>entry?.checked).length;
-        items.push({
-          date: ds,
-          key,
-          wo,
-          day,
-          tonnage: calcSessionTonnage(ds, key),
-          checkedCount
-        });
+        pushSession(ds, key, state.workouts[ds][key], ownPlan?.[key] || WORKOUT_PLAN[key], activeProfile);
       });
     });
+    if(activeProfile==="revan" && state.allUserWorkouts){
+      Object.keys(state.allUserWorkouts).forEach(pk=>{
+        if(pk===activeProfile) return;
+        const userData = state.allUserWorkouts[pk] || {};
+        const plan = userData.plan || {};
+        Object.keys(userData.workouts || {}).forEach(ds=>{
+          Object.keys(userData.workouts?.[ds] || {}).forEach(key=>{
+            pushSession(ds, key, userData.workouts[ds][key], plan[key] || WORKOUT_PLAN[key], pk);
+          });
+        });
+      });
+    }
     items.sort((a,b)=>{
       if(a.date === b.date) return (b.wo?.updatedAt || "").localeCompare(a.wo?.updatedAt || "");
       return b.date.localeCompare(a.date);
@@ -1712,6 +1730,28 @@
       cursor.setDate(cursor.getDate() - 1);
     }
     return streak;
+  }
+  function getCalendarWorkedMeta(ds){
+    const wd = state.workouts?.[ds];
+    let worked = !!(wd && Object.values(wd).some(x=>x.done));
+    let otherUserColor = null;
+    let sourceUser = activeProfile;
+    if(!worked && activeProfile==="revan" && state.allUserWorkouts){
+      Object.keys(state.allUserWorkouts).forEach(pk=>{
+        if(worked || pk===activeProfile) return;
+        const u = state.allUserWorkouts[pk];
+        if(u?.workouts?.[ds]){
+          const uDone = Object.keys(u.workouts[ds]).filter(k=>u.workouts[ds][k].done);
+          if(uDone.length>0){
+            worked = true;
+            sourceUser = pk;
+            if(!otherUserColor && u.plan && u.plan[uDone[0]]) otherUserColor = u.plan[uDone[0]].color;
+            if(!otherUserColor) otherUserColor = PROFILES[pk]?.color;
+          }
+        }
+      });
+    }
+    return { worked, otherUserColor, sourceUser };
   }
 
   window.openWorkoutFromHistory=function(ds,key){
@@ -1758,11 +1798,10 @@
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().split("T")[0];
-        const sessions = Object.values(state.workouts?.[ds] || {});
-        const activeSessions = sessions.filter(sessionHasLoggedActivity);
+        const visible = getCalendarWorkedMeta(ds);
         const tonnage = Object.keys(state.workouts?.[ds] || {}).reduce((sum, key)=>sum + calcSessionTonnage(ds, key), 0);
-        const level = activeSessions.length === 0 ? 0 : tonnage > 2000 ? 1 : tonnage > 500 ? 0.7 : 0.4;
-        days.push({label:labels[i], level, isToday:ds===getTodayStr()});
+        const level = !visible.worked ? 0 : tonnage > 2000 ? 1 : tonnage > 500 ? 0.7 : 0.4;
+        days.push({label:labels[i], level, isToday:ds===getTodayStr(), color:visible.otherUserColor});
       }
       const pct = Math.round((days.filter(x=>x.level > 0).length / days.length) * 100);
       consistencyEl.innerHTML = `
@@ -1774,7 +1813,7 @@
           ${days.map(day=>`
             <div class="consistency-day ${day.level > 0 ? "done" : ""} ${day.isToday ? "today" : ""}">
               <div class="consistency-track">
-                <div class="consistency-fill" style="height:${day.level > 0 ? Math.max(Math.round(day.level * 48), 8) : 0}px;opacity:${day.level > 0 ? Math.max(day.level, .18) : 0}"></div>
+                <div class="consistency-fill" style="height:${day.level > 0 ? Math.max(Math.round(day.level * 48), 8) : 0}px;opacity:${day.level > 0 ? Math.max(day.level, .18) : 0};${day.color?`background:${day.color};`:''}"></div>
               </div>
               <span>${day.label}</span>
             </div>
@@ -1793,7 +1832,8 @@
         const metaDate = new Date(item.date+"T12:00:00");
         const daysAgo = Math.max(0, Math.floor((new Date(getTodayStr()+"T12:00:00") - metaDate)/(1000*60*60*24)));
         const when = daysAgo === 0 ? "Today" : daysAgo === 1 ? "Yesterday" : `${daysAgo} days ago`;
-        const meta = `${when}${item.tonnage>0 ? ` • ${item.tonnage.toLocaleString()} kg moved` : ""}`;
+        const ownerLabel = item.owner && item.owner!==activeProfile ? `${accountRegistry[item.owner]?.name || PROFILES[item.owner]?.label || item.owner} • ` : "";
+        const meta = `${ownerLabel}${when}${item.tonnage>0 ? ` • ${item.tonnage.toLocaleString()} kg moved` : ""}`;
         const sessionMeta = item.wo?.sessionMeta?.rpe ? `RPE ${item.wo.sessionMeta.rpe}` : item.checkedCount > 0 ? `+${item.checkedCount} logged` : `${(item.day.exercises || []).length} exercises`;
         return `
           <button class="activity-card" onclick="openWorkoutFromHistory('${item.date}','${item.key}')">
@@ -1853,23 +1893,9 @@
       const ds=`${yr}-${String(mo+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
       const isT=ds===today,isA=ds===activeDate,isFut=ds>today;
       const wd=state.workouts?.[ds];
-      let worked=wd&&Object.values(wd).some(x=>x.done);
-      let otherUserColor=null;
-
-      if(!worked && activeProfile==="revan" && state.allUserWorkouts){
-        Object.keys(state.allUserWorkouts).forEach(pk=>{
-          if(pk===activeProfile) return;
-          const u=state.allUserWorkouts[pk];
-          if(u.workouts?.[ds]){
-            const uDone=Object.keys(u.workouts[ds]).filter(k=>u.workouts[ds][k].done);
-            if(uDone.length>0){
-              worked=true;
-              if(!otherUserColor && u.plan && u.plan[uDone[0]]) otherUserColor=u.plan[uDone[0]].color;
-              if(!otherUserColor) otherUserColor=PROFILES[pk]?.color;
-            }
-          }
-        });
-      }
+      const visible = getCalendarWorkedMeta(ds);
+      const worked = visible.worked;
+      const otherUserColor = visible.otherUserColor;
 
       const dks=wd?Object.keys(wd).filter(k=>wd[k].done):[];
       const dc=dks.length>0?WORKOUT_PLAN[dks[0]]?.color:otherUserColor;
@@ -1996,6 +2022,7 @@
     const h=ensureHealthEntry(today);
     const adjustedWaterTarget = getAdjustedWaterTarget(activeProfile, today);
     const pt=p.protein||120;
+    const calories=Math.max(0,Math.round(Number(h.calories||0)));
     const soreness=Math.max(0,Math.min(10,Math.round(Number(h.soreness||0))));
     const wp=Math.min(100,Math.round((h.water/adjustedWaterTarget)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
     const ac=PROFILES[activeProfile].color;
@@ -2006,6 +2033,7 @@
       <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${adjustedWaterTarget.toFixed(1)}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">🧪 SUPPLEMENTS</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">CREATINE ${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS ${h.aminos?'✓ TAKEN':'NOT YET'}</button></div></div>
       <div class="hi"><div class="hl">🥩 PROTEIN</div><div class="hc"><button class="ha" onclick="adjHealth('protein',-5)">−</button><span class="hv">${h.protein}g / ${pt}g</span><button class="ha" onclick="adjHealth('protein',5)">+</button></div><div class="hbar"><div class="hbf" style="width:${pp}%;background:${ac}"></div></div></div>
+      <div class="hi"><div class="hl">🔥 CALORIES</div><div class="hc"><button class="ha" onclick="adjHealth('calories',-50)">−</button><span class="hv">${calories} kcal</span><button class="ha" onclick="adjHealth('calories',50)">+</button></div></div>
       <div class="hi">
         <div class="hl">😴 SLEEP</div>
         <div class="hc"><span class="hv" id="sleep-value">${h.sleep.toFixed(1)}h</span></div>
@@ -2025,12 +2053,15 @@
     const p=PROFILES[activeProfile]||{};
     const h=ensureHealthEntry(today);
     const profileName=accountRegistry[activeProfile]?.name || activeProfile;
+    const profileUserEl = document.getElementById("profile-active-user");
+    if(profileUserEl) profileUserEl.textContent = String(profileName).toUpperCase();
     const bw=parseFloat(getPBW(activeProfile,today)||0);
     const adjustedWaterTarget = getAdjustedWaterTarget(activeProfile, today);
     const proteinTarget=p.protein||120;
     const waterGlasses=Math.max(0,Math.round((h.water/0.25)));
     const waterTargetGlasses=Math.max(1,Math.round((adjustedWaterTarget/0.25)));
     const proteinPct=Math.min(100,Math.round(((h.protein||0)/proteinTarget)*100));
+    const calories=Math.max(0,Math.round(Number(h.calories||0)));
     const sleepHours=Math.floor(Number(h.sleep||0));
     const sleepMins=Math.round((Number(h.sleep||0)-sleepHours)*60);
     el.innerHTML=`
@@ -2064,7 +2095,10 @@
             <div class="profile-habit-icon nutrition"><span class="material-symbols-outlined">restaurant</span></div>
             <div class="profile-habit-copy"><strong>Nutrition</strong><span>TARGET: ${proteinTarget} G PROTEIN</span></div>
           </div>
-          <div class="profile-nutrition-side"><strong>${h.protein||0}</strong><span>CURRENT</span></div>
+          <div class="profile-nutrition-side">
+            <strong>${h.protein||0}</strong><span>PROTEIN</span>
+            <button class="profile-inline-link" onclick="adjHealth('protein',25)">+25G</button>
+          </div>
           <div class="profile-progress-bar"><div class="profile-progress-fill" style="width:${proteinPct}%"></div></div>
         </div>
         <div class="profile-two-col">
@@ -2077,6 +2111,18 @@
             <div class="profile-habit-icon sleep"><span class="material-symbols-outlined">bedtime</span></div>
             <div><strong>Sleep</strong><span>${sleepHours} H ${String(sleepMins).padStart(2,'0')} M</span></div>
             <button class="profile-sleep-btn" onclick="logSleepPrompt()">LOG SLEEP</button>
+          </div>
+        </div>
+        <div class="profile-two-col">
+          <div class="profile-mini-card">
+            <div class="profile-habit-icon nutrition"><span class="material-symbols-outlined">local_fire_department</span></div>
+            <div><strong>Calories</strong><span>${calories} KCAL TODAY</span></div>
+            <button class="profile-sleep-btn" onclick="logCaloriesPrompt()">LOG CALORIES</button>
+          </div>
+          <div class="profile-mini-card">
+            <div class="profile-habit-icon water"><span class="material-symbols-outlined">monitor_weight</span></div>
+            <div><strong>Bodyweight</strong><span>${bw>0?`${bw.toFixed(1)} KG`:'NO WEIGH-IN YET'}</span></div>
+            <button class="profile-sleep-btn" onclick="logTodayWeightPrompt()">LOG WEIGHT</button>
           </div>
         </div>
       </section>
@@ -2102,15 +2148,53 @@
     await setHealthValue('sleep', next);
     renderProfileShell();
   };
-  function ensureHealthEntry(dateStr){
+  window.logCaloriesPrompt=async function(){
+    const current=ensureHealthEntry(getTodayStr()).calories || "";
+    const next=prompt("Log calories for today", current);
+    if(next===null) return;
+    await setHealthValue('calories', next);
+    renderProfileShell();
+  };
+  function isDateKey(v){
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(v||""));
+  }
+  function normalizeHealthStore(){
     if(!state.health || typeof state.health !== "object" || Array.isArray(state.health)) state.health = {};
-    const v = state.health[dateStr];
-    if(!v || typeof v !== "object" || Array.isArray(v)){
-      state.health[dateStr]={water:0,creatine:false,aminos:false,protein:0,sleep:0,soreness:0};
+    const keys = Object.keys(state.health || {});
+    if(!keys.length) return;
+    if(keys.every(isDateKey)){
+      state.health = { [activeProfile]: deepCopy(state.health) };
+      return;
     }
-    const entry = state.health[dateStr];
+    keys.forEach(pk=>{
+      const bucket = state.health[pk];
+      if(!bucket || typeof bucket !== "object" || Array.isArray(bucket)) state.health[pk] = {};
+    });
+  }
+  function getHealthBucket(profileKey=activeProfile){
+    normalizeHealthStore();
+    if(!state.health[profileKey] || typeof state.health[profileKey] !== "object" || Array.isArray(state.health[profileKey])) state.health[profileKey] = {};
+    return state.health[profileKey];
+  }
+  function getHealthEntriesFromStore(rawHealth, profileKey=activeProfile){
+    if(!rawHealth || typeof rawHealth !== "object" || Array.isArray(rawHealth)) return {};
+    const keys = Object.keys(rawHealth);
+    if(!keys.length) return {};
+    if(keys.every(isDateKey)) return rawHealth;
+    const nested = rawHealth[profileKey];
+    if(nested && typeof nested === "object" && !Array.isArray(nested)) return nested;
+    return {};
+  }
+  function ensureHealthEntry(dateStr, profileKey=activeProfile){
+    const bucket = getHealthBucket(profileKey);
+    const v = bucket[dateStr];
+    if(!v || typeof v !== "object" || Array.isArray(v)){
+      bucket[dateStr]={water:0,creatine:false,aminos:false,protein:0,calories:0,sleep:0,soreness:0};
+    }
+    const entry = bucket[dateStr];
     if(typeof entry.water !== "number") entry.water = Number(entry.water || 0);
     if(typeof entry.protein !== "number") entry.protein = Number(entry.protein || 0);
+    if(typeof entry.calories !== "number") entry.calories = Number(entry.calories || 0);
     if(typeof entry.sleep !== "number") entry.sleep = Number(entry.sleep || 0);
     if(typeof entry.soreness !== "number") entry.soreness = Number(entry.soreness || 0);
     if(typeof entry.creatine !== "boolean") entry.creatine = !!entry.creatine;
@@ -2122,12 +2206,13 @@
     const entry = ensureHealthEntry(t);
     const current = Number(entry[k] || 0);
     let next = current + d;
-    if(k==="protein") next = Math.round(next);
+    if(k==="protein" || k==="calories") next = Math.round(next);
     else if(k==="water") next = Math.round(next * 100) / 100;
     else if(k==="sleep") next = Math.round(next * 10) / 10;
     else next = Math.round(next * 100) / 100;
     entry[k] = Math.max(0, next);
     renderHealthChecklist();
+    renderProfileShell();
     await saveData();
   };
   window.previewSleep=function(v){
@@ -2148,7 +2233,7 @@
     const t=getTodayStr();
     const entry=ensureHealthEntry(t);
     let next = Number(v || 0);
-    if(k==="protein") next = Math.round(next);
+    if(k==="protein" || k==="calories") next = Math.round(next);
     else if(k==="water") next = Math.round(next * 100) / 100;
     else if(k==="sleep") next = Math.round(next * 10) / 10;
     else if(k==="soreness") next = Math.round(next);
@@ -2156,6 +2241,7 @@
     entry[k] = Math.max(0, next);
     if(k==="soreness") entry[k] = Math.min(10, entry[k]);
     renderHealthChecklist();
+    renderProfileShell();
     await saveData();
   };
   window.togHealth=async function(k){
@@ -2163,6 +2249,7 @@
     const entry = ensureHealthEntry(t);
     entry[k]=!entry[k];
     renderHealthChecklist();
+    renderProfileShell();
     await saveData();
   };
 
@@ -3027,7 +3114,7 @@
   function renderDateSummary(ds){
     const panel=document.getElementById("day-panel");
     const wd=state.workouts?.[ds];
-    const h=state.health?.[ds]||{water:0,creatine:false,aminos:false,protein:0};
+    const h=ensureHealthEntry(ds, activeProfile);
     const p=PROFILES[activeProfile];
     const wt=p.water||2.5, pt=p.protein||120;
     const wp=Math.min(100,Math.round((h.water/wt)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
@@ -4179,7 +4266,7 @@
     downloadText(`ironlog_users_${ts}.csv`,toCsv(["key","name","pin","height_cm","water_l","protein_g","color","created_at"],adminTablesCache.users||[]),"text/csv");
     downloadText(`ironlog_workouts_${ts}.csv`,toCsv(["user","date","day_key","done","exercise_entries","note"],adminTablesCache.workouts||[]),"text/csv");
     downloadText(`ironlog_exercises_${ts}.csv`,toCsv(["user","exercise","source","sets","reps","muscle_group"],adminTablesCache.exercises||[]),"text/csv");
-    downloadText(`ironlog_collected_${ts}.csv`,toCsv(["user","date","type","value","water_l","protein_g","sleep_h","soreness"],adminTablesCache.collected||[]),"text/csv");
+    downloadText(`ironlog_collected_${ts}.csv`,toCsv(["user","date","type","value","water_l","protein_g","calories","sleep_h","soreness"],adminTablesCache.collected||[]),"text/csv");
     toast("Data pack exported");
   };
   function getNotifications(){
@@ -4368,11 +4455,12 @@
             value:bw[date],
             water_l:"",
             protein_g:"",
+            calories:"",
             sleep_h:"",
             soreness:""
           });
         });
-        const h=profileData[pk]?.health||{};
+        const h=getHealthEntriesFromStore(profileData[pk]?.health||{}, pk);
         Object.keys(h).sort().forEach(date=>{
           const v=h[date]||{};
           collectedRows.push({
@@ -4382,6 +4470,7 @@
             value:"",
             water_l:v.water??"",
             protein_g:v.protein??"",
+            calories:v.calories??"",
             sleep_h:v.sleep??"",
             soreness:v.soreness??""
           });
@@ -4431,7 +4520,7 @@
         ${buildTable("Users",["key","name","pin","height_cm","water_l","protein_g","color","created_at"],filteredUsers,usersBytes)}
         ${buildTable("Workouts",["user","date","day_key","done","exercise_entries","note"],filteredWorkouts,workoutsBytes)}
         ${buildTable("Exercises",["user","exercise","source","sets","reps","muscle_group"],filteredExercises,exercisesBytes)}
-        ${buildTable("Collected Data",["user","date","type","value","water_l","protein_g","sleep_h","soreness"],filteredCollected,collectedBytes)}
+        ${buildTable("Collected Data",["user","date","type","value","water_l","protein_g","calories","sleep_h","soreness"],filteredCollected,collectedBytes)}
       `;
     }catch(e){
       root.innerHTML=`<div style="color:#ff9b9b;padding:12px">Failed to load admin data.</div>`;
@@ -4637,32 +4726,40 @@ button,input,select,textarea{font:inherit}
 body.auth-locked .hdr,
 body.auth-locked .sbar,
 body.auth-locked .main{display:none}
-#auth-gate{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:20px;background:radial-gradient(circle at top right,rgba(232,93,4,.18),transparent 55%),var(--bg)}
-.auth-card{width:100%;max-width:760px;background:linear-gradient(160deg,var(--bg2),var(--bg3));border:1px solid var(--border);box-shadow:var(--shadow);padding:22px;position:relative;overflow:hidden}
-.auth-card::before{content:"";position:absolute;top:-40px;right:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(232,93,4,.2),transparent 70%);pointer-events:none}
+#auth-gate{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:24px;background:radial-gradient(circle at top right,rgba(232,93,4,.16),transparent 28%),linear-gradient(180deg,#151515,#0f0f0f)}
+.auth-card{width:100%;max-width:420px;background:linear-gradient(180deg,#1f1f1f,#171717);border:none;box-shadow:0 30px 70px rgba(0,0,0,.42);padding:24px;position:relative;overflow:hidden;border-radius:28px}
+.auth-card::before{content:"";position:absolute;inset:-25% -35% auto auto;width:220px;height:220px;border-radius:50%;background:radial-gradient(circle,rgba(242,100,17,.18),transparent 70%);pointer-events:none}
+.auth-card::after{content:"";position:absolute;inset:auto auto -30% -20%;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(255,181,150,.12),transparent 70%);pointer-events:none}
 .auth-title{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.18em;font-size:1.35rem}
 .auth-title .auth-log{color:var(--accent)}
-.auth-sub{margin-top:4px;color:var(--muted);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.82rem}
-.auth-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
-.auth-pane{border:1px solid var(--border);background:var(--bg3);padding:12px}
-.auth-h{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.13em;font-size:.86rem;color:var(--muted);margin-bottom:8px}
-.auth-msg{margin-top:8px;color:#ff9b9b;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.78rem}
+.auth-sub{margin-top:6px;color:#999;font-family:'Inter',sans-serif;letter-spacing:.01em;font-size:.88rem;line-height:1.45}
+.auth-grid{display:grid;grid-template-columns:1fr;gap:14px;margin-top:18px}
+.auth-pane{border:none;background:#232323;padding:18px;border-radius:22px}
+.auth-h{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.16em;font-size:.8rem;color:var(--accent-soft);margin-bottom:14px}
+.auth-msg{margin-top:12px;color:#ff9b9b;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em;font-size:.78rem}
 .auth-msg:empty{display:none}
 .auth-meta{margin-top:8px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .auth-ver{color:var(--muted);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.76rem;white-space:nowrap}
-.auth-pane .fi,.auth-pane .fsel{margin-bottom:7px}
+.auth-pane .fi,.auth-pane .fsel{margin-bottom:10px;border:none;background:#171717;border-radius:16px;min-height:52px}
 .auth-field-label{font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.76rem;color:var(--muted)}
-.auth-home{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;min-height:240px;text-align:center}
-.auth-actions{display:flex;gap:10px}
-.auth-actions .st-ab{min-width:170px;padding:11px 14px;font-size:.85rem;background:var(--bg4)}
-.auth-actions .st-ab:first-child{border-color:rgba(232,93,4,.45);color:#f4c7a8}
-.auth-actions .st-ab:last-child{border-color:rgba(92,186,92,.4);color:#b7f3b7}
-.auth-actions .st-ab:hover{filter:brightness(1.08)}
-.auth-back{margin-top:6px}
+.auth-home{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;gap:14px;min-height:310px;text-align:left;padding:24px;border-radius:24px;position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(10,10,10,.08),rgba(10,10,10,.82)),linear-gradient(135deg,#1b1b1b,#111)}
+.auth-home::before{content:"";position:absolute;inset:0;background:url('https://lh3.googleusercontent.com/aida-public/AB6AXuAWk59FjtWTePj3H0riY9nt90Pl8jzQ2UfACl_hjfIzTPSmwL8HI1gCMO0wSMgkrbtt_Fy0ODHlgMzm869m0Rrg9irb4L0714oqaqvCiPcPpBKXvBwcZWLwHfi7QeT6VTgC3eVHiUTeqVXhCNzn4DVQU02mql0TJbu12aLve2ZvBvHt-DHrNdqJCehx5JqbLHPLRmnsx4DO6A_eTw0f_0z9QCQxEsBoda0_Gi64QP04E1XAwiPVxWIRG3TVHcl5Vts5fqQYW3YsuL8') center/cover no-repeat;opacity:.3;filter:grayscale(1)}
+.auth-home > *{position:relative;z-index:1}
+.auth-kicker{font-size:.66rem;font-weight:800;letter-spacing:.22em;color:var(--accent-soft);text-transform:uppercase}
+.auth-home-copy{display:grid;gap:10px}
+.auth-home-title{font-family:'Barlow Condensed',sans-serif;font-size:3rem;line-height:.86;font-weight:900;font-style:italic;text-transform:uppercase}
+.auth-home-title .accent-word{color:var(--accent)}
+.auth-actions{display:grid;grid-template-columns:1fr;gap:10px;width:100%;margin-top:6px}
+.auth-actions .st-ab,.auth-pane .st-ab{min-height:56px;padding:0 16px;font-size:.84rem;border:none;border-radius:18px;background:#2a2a2a}
+.auth-actions .st-ab:first-child,.auth-pane .st-ab:not(.auth-back){background:linear-gradient(135deg,var(--accent-soft),var(--accent));color:#2d1206}
+.auth-actions .st-ab:last-child,.auth-back{background:#2a2a2a;color:#f1f1f1}
+.auth-back{margin-top:2px}
 .color-swatches{display:flex;flex-wrap:wrap;gap:8px;padding:7px 0}
 .color-dot{width:20px;height:20px;border-radius:50%;border:1px solid var(--border);background:var(--dot);cursor:pointer;outline:none}
 .color-dot.active{border-color:#fff;box-shadow:0 0 0 2px rgba(255,255,255,.25);transform:scale(1.08)}
 .auth-card,.auth-pane{border-radius:var(--radius)}
+.auth-select-label{font-size:.66rem;font-weight:800;letter-spacing:.16em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+.auth-card .logo-brand{align-items:center}
 html.light-mode #auth-gate{background:radial-gradient(circle at top right,rgba(232,93,4,.15),transparent 55%),#e9e7e2}
 html.light-mode .auth-card{background:linear-gradient(165deg,#f8f7f3,#ece9e3);border-color:#bcb7ae}
 html.light-mode .auth-pane{background:#f2f0eb;border-color:#c5c0b7}
@@ -4676,7 +4773,7 @@ html.light-mode .auth-actions .st-ab:last-child{color:#2f6a2f;border-color:rgba(
 html.light-mode .auth-msg{color:#b42318}
 @media(max-width:760px){
   .auth-grid{grid-template-columns:1fr}
-  .auth-actions{flex-direction:column;width:100%}
+  .auth-actions{width:100%}
   .auth-meta{flex-direction:column;align-items:flex-start}
 }
 
@@ -5209,8 +5306,11 @@ body[data-mobile-section="progress"] #mobile-progress-section,
 body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .hdr{padding:16px 20px;background:rgba(19,19,19,.78);border-bottom:none;backdrop-filter:blur(22px);box-shadow:0 18px 36px rgba(0,0,0,.3)}
 .hdr-center{display:none}
-.hdr-right{gap:8px}
+.hdr-right{gap:8px;display:flex;align-items:center}
 .hdr-icn-btn{width:34px;height:34px;border-radius:999px;border:none;background:transparent;color:#b7b7b7;font-size:1rem;display:grid;place-items:center}
+.hdr-right #header-datetime{align-items:flex-end;text-align:right;padding:0 2px}
+.hdr-right #header-datetime span:first-child{font-size:.62rem;letter-spacing:.12em}
+.hdr-right #header-datetime .htime{font-size:.84rem;letter-spacing:.14em}
 .logo-brand{display:flex;align-items:center;gap:10px}
 .logo{font-family:'Barlow Condensed',sans-serif;font-size:1.45rem;font-weight:900;letter-spacing:.08em;font-style:italic;color:var(--accent)}
 .logo-log{color:var(--accent)}
@@ -5405,6 +5505,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .profile-habit-card.nutrition{grid-template-columns:1fr auto;align-items:start}
 .profile-nutrition-side{text-align:right}
 .profile-nutrition-side strong{display:block;font-family:'Barlow Condensed',sans-serif;font-size:2.4rem;line-height:.9;font-style:italic;font-weight:900;color:#fff}
+.profile-inline-link{margin-top:10px;min-height:34px;padding:0 10px;border:none;border-radius:999px;background:rgba(255,255,255,.08);color:var(--accent-soft);font-family:'Barlow Condensed',sans-serif;font-size:.72rem;font-weight:900;letter-spacing:.12em;text-transform:uppercase}
 .profile-progress-bar{grid-column:1/-1;height:8px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
 .profile-progress-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--accent-soft),var(--accent))}
 .profile-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
@@ -5517,8 +5618,12 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 <div id="auth-gate">
   <div class="auth-card">
     <div id="auth-home" class="auth-home">
-      <div class="auth-title"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON <span class="auth-log">LOG</span></span></div>
-      <div class="auth-sub">Choose an option to continue.</div>
+      <div class="auth-kicker">WELCOME BACK, CHAMPION</div>
+      <div class="auth-home-copy">
+        <div class="auth-title"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON <span class="auth-log">LOG</span></span></div>
+        <div class="auth-home-title">READY TO <span class="accent-word">CRUSH</span> IT?</div>
+        <div class="auth-sub">Sign in to continue training with your own profile, metrics, and daily recovery tracking.</div>
+      </div>
       <div class="auth-actions">
         <button class="st-ab" onclick="showAuthMode('signin')">SIGN IN</button>
         <button class="st-ab" onclick="showAuthMode('signup')">SIGN UP</button>
@@ -5527,6 +5632,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
     <div id="auth-grid" class="auth-grid" style="display:none">
       <div id="auth-signin-pane" class="auth-pane" style="display:none">
         <div class="auth-h">SIGN IN</div>
+        <div class="auth-select-label">SELECT PROFILE</div>
         <select id="auth-user-select" class="fsel"></select>
         <input id="auth-pin" class="fi" type="password" inputmode="numeric" placeholder="PIN">
         <button class="st-ab" onclick="signInAccount()">SIGN IN</button>
@@ -5568,10 +5674,8 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 <!-- HEADER -->
 <div class="hdr">
   <div class="logo"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON<span class="logo-log">LOG</span></span></div>
-  <div class="hdr-center"><div id="header-datetime"></div></div>
   <div class="hdr-right">
-    <button class="hdr-icn-btn notif-btn" onclick="toggleNotifications()" title="Notifications">🔔<span id="notif-badge">0</span></button>
-    <button class="hdr-icn-btn" onclick="openSettings()" title="Settings">☰</button>
+    <div id="header-datetime"></div>
   </div>
 </div>
 <div id="coverWorkoutPlayer">
