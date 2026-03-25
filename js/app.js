@@ -12,7 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.35";
+  const APP_VERSION = "v1.1.36";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
