@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-  import { getFirestore, doc, setDoc, getDoc, getDocFromServer, onSnapshot, deleteField } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getFirestore, doc, setDoc, getDoc, getDocFromServer, onSnapshot, deleteField, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDwkvvVwJbk3JC_ddej74sFOxgPBl2ccE8",
@@ -12,7 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.38";
+  const APP_VERSION = "v1.1.39";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -540,10 +540,27 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   }
   function getWorkoutDisplayLabel(key, fallbackIndex=null){
     const day = WORKOUT_PLAN?.[key] || {};
-    const explicit = String(day.label || "").trim();
-    if(explicit) return explicit;
-    const order = fallbackIndex != null ? fallbackIndex + 1 : getWorkoutOrderValue(key);
-    return `DAY ${order}`;
+    const order = fallbackIndex != null
+      ? fallbackIndex + 1
+      : Math.max(1, sortedDayKeys().indexOf(key) + 1 || getWorkoutOrderValue(key));
+    const weekday = getWorkoutWeekdayLabel(day.weekday);
+    return weekday && weekday !== "—" ? `DAY ${order} - ${weekday}` : `DAY ${order}`;
+  }
+  function getProjectedWorkoutDisplayLabel(key, weekdayOverride){
+    const projectedKeys = Object.keys(WORKOUT_PLAN).sort((a,b)=>{
+      const dayA = a===key ? { ...(WORKOUT_PLAN[a]||{}), weekday: weekdayOverride } : (WORKOUT_PLAN[a] || {});
+      const dayB = b===key ? { ...(WORKOUT_PLAN[b]||{}), weekday: weekdayOverride } : (WORKOUT_PLAN[b] || {});
+      const weekdayDiff = getWorkoutWeekdaySortValue(dayA) - getWorkoutWeekdaySortValue(dayB);
+      if(weekdayDiff !== 0) return weekdayDiff;
+      const diff = getWorkoutOrderValue(a) - getWorkoutOrderValue(b);
+      return diff !== 0 ? diff : String(a).localeCompare(String(b));
+    });
+    const order = Math.max(1, projectedKeys.indexOf(key) + 1);
+    const weekday = getWorkoutWeekdayLabel(weekdayOverride);
+    return weekday && weekday !== "—" ? `DAY ${order} - ${weekday}` : `DAY ${order}`;
+  }
+  function getEditableWorkoutLabel(key){
+    return getWorkoutDisplayLabel(key);
   }
   function getWorkoutWeekdayLabel(weekday){
     const parsed = Number(weekday);
@@ -942,6 +959,30 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       payload[`profileData.${activeProfile}.prs.${prKey}`] = deleteField();
     });
     await setDoc(ref, payload, { merge: true });
+  }
+  async function persistDeletionState(){
+    try{
+      normalizeWorkoutPlanOrder();
+      saveLocalSnapshot(activeProfile);
+      const ref = doc(db, "ironlog", SHARED_DOC);
+      const payload = {
+        workouts: state.workouts || {},
+        plan: WORKOUT_PLAN || {},
+        [`profileData.${activeProfile}.workouts`]: state.workouts || {},
+        [`profileData.${activeProfile}.prs`]: state.prs || {},
+        [`profileData.${activeProfile}.plan`]: WORKOUT_PLAN || {}
+      };
+      if(activeProfile==="revan"){
+        payload.prs = state.prs || {};
+        payload.savedWorkouts = state.savedWorkouts || {};
+        payload.gymUrl = state.gymUrl || "";
+      }
+      await updateDoc(ref, payload);
+      clearPendingSync(activeProfile);
+    } catch(e){
+      markPendingSync(activeProfile);
+      throw e;
+    }
   }
 
   window.switchProfile=function(pk){
@@ -1599,22 +1640,31 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     return planned > 0 ? Math.round((completed / planned) * 100) : 0;
   }
   function getWeeklyFreq(){
-    const w=["Wk 1","Wk 2","Wk 3","Wk 4"],c=[0,0,0,0],colors=[PROFILES[activeProfile]?.color||"#e85d04",PROFILES[activeProfile]?.color||"#e85d04",PROFILES[activeProfile]?.color||"#e85d04",PROFILES[activeProfile]?.color||"#e85d04"],p=getMonthKey();
-    const weeklyDayCounts = [{},{},{},{}];
+    const w=["Wk 1","Wk 2","Wk 3","Wk 4"],totals=[0,0,0,0],p=getMonthKey();
+    const weeklyDayCounts = {};
     Object.keys(state.workouts||{}).forEach(d=>{
       if(!String(d).startsWith(p)) return;
       Object.keys(state.workouts[d] || {}).forEach(key=>{
         if(!sessionHasActivityForParticipant(state.workouts[d][key], key, activeProfile)) return;
         const i=Math.min(Math.floor((new Date(d+"T12:00:00").getDate()-1)/7),3);
-        c[i]++;
-        weeklyDayCounts[i][key]=(weeklyDayCounts[i][key]||0)+1;
+        totals[i]++;
+        if(!weeklyDayCounts[key]) weeklyDayCounts[key]=[0,0,0,0];
+        weeklyDayCounts[key][i]=(weeklyDayCounts[key][i]||0)+1;
       });
     });
-    weeklyDayCounts.forEach((bucket, index)=>{
-      const topKey = Object.keys(bucket).sort((a,b)=>bucket[b]-bucket[a])[0];
-      if(topKey && WORKOUT_PLAN[topKey]?.color) colors[index] = WORKOUT_PLAN[topKey].color;
-    });
-    return {w,c,colors};
+    const datasets = Object.keys(weeklyDayCounts)
+      .filter(key=>weeklyDayCounts[key].some(Boolean))
+      .sort((a,b)=>getWorkoutOrderValue(a)-getWorkoutOrderValue(b))
+      .map(key=>({
+        label: getWorkoutDayDescriptor(key, null)?.title || key,
+        data: weeklyDayCounts[key],
+        backgroundColor: getWorkoutDayDescriptor(key, null)?.color || PROFILES[activeProfile]?.color || "#e85d04",
+        borderColor: getWorkoutDayDescriptor(key, null)?.color || PROFILES[activeProfile]?.color || "#e85d04",
+        borderWidth: 0,
+        borderRadius: 10,
+        stack: "weekly"
+      }));
+    return {w,totals,datasets};
   }
   function getDayTypeBreakdown(){
     const p=getMonthKey(),b={}; Object.keys(WORKOUT_PLAN).forEach(k=>b[k]=0);
@@ -2057,7 +2107,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   function getHistoryFeedEntries(limit=0){
     const items = [];
-    getVisibleWorkedDates().forEach(ds=>{
+    Object.keys(state.workouts || {}).sort((a,b)=>b.localeCompare(a)).forEach(ds=>{
       getCalendarDayEntries(ds).forEach(entry=>{
         items.push({ ...entry, date: ds });
       });
@@ -2181,7 +2231,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().split("T")[0];
         const entries = getCalendarDayEntries(ds);
-        days.push({label:labels[i], worked:entries.length>0, count:entries.length, isToday:ds===getTodayStr(), date:ds});
+        const workoutColor = entries[0]?.day?.color || getCalendarWorkedMeta(ds).otherUserColor || "";
+        days.push({label:labels[i], worked:entries.length>0, count:entries.length, isToday:ds===getTodayStr(), date:ds, entries, workoutColor});
       }
       const pct = Math.round((days.filter(x=>x.worked).length / days.length) * 100);
       consistencyEl.innerHTML = `
@@ -2191,34 +2242,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         </div>
         <div class="consistency-bars">
           ${days.map(day=>`
-            <button class="consistency-pill ${day.worked ? "done" : ""} ${day.isToday ? "today" : ""}" onclick="navTo('progress');selectDate('${day.date}')">
+            <button class="consistency-pill ${day.worked ? "done" : ""} ${day.isToday ? "today" : ""}" ${day.workoutColor ? `style="--pill-workout:${day.workoutColor}"` : ""} onclick="navTo('progress');selectDate('${day.date}')">
               <strong>${day.label}</strong>
               <em>${day.count || 0}</em>
             </button>
           `).join("")}
         </div>
       `;
-    }
-
-    const activityMarkup = ()=>{
-      const sessions = getRecentDashboardSessions(3);
-      if(!sessions.length){
-        const fallbackDays = getVisibleActivityFallback(3);
-        if(fallbackDays.length){
-          return fallbackDays.map(item=>`
-            <button class="activity-card" onclick="setMobileSection('progress');selectDate('${item.date}')">
-              <span class="activity-icon material-symbols-outlined">fitness_center</span>
-              <span class="activity-copy">
-                <span class="activity-title">${item.title}</span>
-                <span class="activity-meta">${new Date(item.date+"T12:00:00").toLocaleDateString("en-ZA",{weekday:"short", day:"numeric", month:"short"})}</span>
-              </span>
-              <span class="activity-tag"><span class="material-symbols-outlined">chevron_right</span></span>
-            </button>
-          `).join("");
+      const weekEntries = days.flatMap(day=>day.entries.map(entry=>({ ...entry, date: day.date }))).slice(0, 3);
+      const activityMarkup = ()=>{
+        if(!weekEntries.length){
+          return `<div class="activity-empty">No workouts logged this week yet. Complete a session and it will appear here immediately.</div>`;
         }
-        return `<div class="activity-empty">No workouts logged yet. Start a session and your last 3 workouts will show here.</div>`;
-      }
-      return sessions.map(item=>{
+        return weekEntries.map(item=>{
         const icon = item.day.title?.includes("CARDIO") ? "sprint" : "fitness_center";
         const metaDate = new Date(item.date+"T12:00:00");
         const daysAgo = Math.max(0, Math.floor((new Date(getTodayStr()+"T12:00:00") - metaDate)/(1000*60*60*24)));
@@ -2237,13 +2273,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             <span class="activity-tag">${sessionMeta}</span>
           </button>
         `;
-      }).join("");
-    };
-    if(activityEl){
-      activityEl.innerHTML = activityMarkup();
-    }
-    if(progressActivityEl){
-      progressActivityEl.innerHTML = activityMarkup();
+        }).join("");
+      };
+      if(activityEl){
+        activityEl.innerHTML = activityMarkup();
+      }
+      if(progressActivityEl){
+        progressActivityEl.innerHTML = activityMarkup();
+      }
     }
   }
 
@@ -2306,10 +2343,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function renderCharts(){
     if(!dashboardOpen)return;
     const ac=PROFILES[activeProfile].color;
-    const {w,c,colors}=getWeeklyFreq();
+    const {w,totals,datasets}=getWeeklyFreq();
     const gopt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true,barInside:true}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:13}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"},stepSize:1},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}};
-    if(freqChart){freqChart.data.datasets[0].data=c;freqChart.data.datasets[0].backgroundColor=colors;freqChart.data.datasets[0].borderColor=colors;freqChart.update();}
-    else freqChart=new Chart(document.getElementById("freqChart"),{type:"bar",data:{labels:w,datasets:[{label:"Workouts",data:c,backgroundColor:colors,borderColor:colors,borderWidth:2,borderRadius:6}]},options:gopt});
+    const freqOptions={...gopt,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true,stackTotals:true}},scales:{x:{stacked:true,ticks:{color:"#888",font:{family:"Barlow Condensed",size:13}},grid:{color:"rgba(255,255,255,0.04)"}},y:{stacked:true,ticks:{color:"#888",font:{family:"Barlow Condensed"},stepSize:1},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}};
+    if(freqChart){freqChart.data.labels=w;freqChart.data.datasets=datasets;freqChart.update();}
+    else freqChart=new Chart(document.getElementById("freqChart"),{type:"bar",data:{labels:w,datasets},options:freqOptions});
     const bd=getDayTypeBreakdown();
     const bData=sortedDayKeys().map(k=>bd[k]),bColors=sortedDayKeys().map(k=>WORKOUT_PLAN[k].color),bLab=sortedDayKeys().map(k=>WORKOUT_PLAN[k].title);
     if(volChart){volChart.data.datasets[0].data=bData;volChart.update();}
@@ -2317,17 +2355,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const td=getMonthTonnage();
     const tL=td.map(x=>x.label),tV=td.map(x=>x.tonnage),tC=td.map(x=>WORKOUT_PLAN[x.dayKey]?.color||ac);
     if(tonnageChart){tonnageChart.data.labels=tL;tonnageChart.data.datasets[0].data=tV;tonnageChart.data.datasets[0].backgroundColor=tC;tonnageChart.update();}
-    else tonnageChart=new Chart(document.getElementById("tonnageChart"),{type:"bar",data:{labels:tL,datasets:[{label:"Tonnage (kg)",data:tV,backgroundColor:tC,borderRadius:6}]},options:{...gopt,scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}}});
+    else tonnageChart=new Chart(document.getElementById("tonnageChart"),{type:"bar",data:{labels:tL,datasets:[{label:"Tonnage (kg)",data:tV,backgroundColor:tC,borderRadius:6}]},options:{...gopt,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true,barRotate:-90}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}}});
     const bw=getBwHistory();
     if(bwChart){bwChart.data.labels=bw.map(x=>x.label);bwChart.data.datasets[0].data=bw.map(x=>x.weight);bwChart.update();}
     else bwChart=new Chart(document.getElementById("bwChart"),{type:"line",data:{labels:bw.map(x=>x.label),datasets:[{label:"kg",data:bw.map(x=>x.weight),borderColor:"#f0c040",backgroundColor:"rgba(240,192,64,0.07)",borderWidth:2.5,pointBackgroundColor:"#f0c040",pointRadius:4,pointHoverRadius:6,tension:0.4,fill:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:false}}}});
     const sleep=getSleepHistory();
     if(sleepChart){sleepChart.data.labels=sleep.map(x=>x.label);sleepChart.data.datasets[0].data=sleep.map(x=>x.sleep);sleepChart.update();}
     else sleepChart=new Chart(document.getElementById("sleepChart"),{type:"line",data:{labels:sleep.map(x=>x.label),datasets:[{label:"hours",data:sleep.map(x=>x.sleep),borderColor:"#7b2d8b",backgroundColor:"rgba(123,45,139,0.07)",borderWidth:2.5,pointBackgroundColor:"#7b2d8b",pointRadius:4,pointHoverRadius:6,tension:0.4,fill:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}}});
-    const mvm=getMonthVolumeByMuscleGroup();
-    const mvLabels=['CHEST','BACK','SHOULDERS','ARMS','LEGS','CORE'],mvData=[mvm.chest,mvm.back,mvm.shoulders,mvm.arms,mvm.legs,mvm.core],mvColors=['#e85d04','#4361ee','#2ec4b6','#f72585','#7b2d8b','#f0c040'];
-    if(window.muscleVolChart){window.muscleVolChart.data.datasets[0].data=mvData;window.muscleVolChart.update();}
-    else {const mvCanvas=document.getElementById('muscleVolChart');if(mvCanvas)window.muscleVolChart=new Chart(mvCanvas,{type:'doughnut',data:{labels:mvLabels,datasets:[{data:mvData,backgroundColor:mvColors,borderColor:'#111',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#aaa',font:{family:'Barlow Condensed',size:11},padding:10,boxWidth:12}},ironlogValueLabels:{enabled:true}}}});}
   }
 
   function renderWeeklySummary(){
@@ -3210,7 +3244,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const sessionNote=wo.notes||"";
     panel.innerHTML=`<section class="active-workout-shell">
       <div class="active-workout-head">
-        <div><p class="active-workout-kicker">${day.label} • ${day.subtitle || "Workout"}</p><h3 class="active-workout-title">${activeExercise?.name || day.title}</h3></div>
+        <div><p class="active-workout-kicker">${getWorkoutDisplayLabel(key)} • ${day.subtitle || "Workout"}</p><h3 class="active-workout-title">${activeExercise?.name || day.title}</h3></div>
         <div class="active-workout-rest"><span>Session Clock</span><strong id="session-display-active">${getSessionDisplayText()}</strong><div class="active-timer-actions"><button id="timer-play-active" class="active-timer-btn" onclick="startSessionTimer()">Start</button><button id="timer-pause-active" class="active-timer-btn" style="display:none" onclick="pauseSessionTimer()">Pause</button><button class="active-timer-btn end" onclick="markDone('${key}')">End</button></div></div>
       </div>
       <div class="active-workout-visual"><div class="active-workout-overlay"><div class="active-workout-stat"><span>Workout</span><strong>${day.title}</strong></div><div class="active-workout-stat"><span>Progress</span><strong>${pct}<em>%</em></strong></div></div></div>
@@ -3358,7 +3392,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     let h=`${activeWorkoutShell}<div class="ph" style="border-left:4px solid ${day.color}">
       <div class="phl">
         <div class="ph-row1">
-          <span class="pl" style="color:${day.color}">${day.label} — ${day.title}</span>
+          <span class="pl" style="color:${day.color}">${getWorkoutDisplayLabel(key)} — ${day.title}</span>
           <span class="ps-inline">${day.subtitle}</span>
         </div>
         <div class="ph-row2">
@@ -3785,7 +3819,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         const parts=day.participants||['revan'];
         h_content+=`<div style="margin-top:16px;padding:12px;background:rgba(255,255,255,0.02);border-radius:6px;border-left:3px solid ${day.color}">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-            <span style="color:${day.color};font-weight:600;font-family:'Barlow Condensed'">🏋️ ${day.label} — ${day.title}</span>
+            <span style="color:${day.color};font-weight:600;font-family:'Barlow Condensed'">🏋️ ${getWorkoutDisplayLabel(key)} — ${day.title}</span>
             ${ton>0?`<span style="color:#aaa;font-size:0.9em">⚡ ${ton}kg</span>`:''}
           </div>`;
         day.exercises.forEach(ex=>{
@@ -4001,8 +4035,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const panel = document.getElementById("day-panel");
       if(panel) panel.style.display = "none";
     }
-    await saveData();
-    await deleteRemoteWorkoutEntry(ds, key, removedPrKeys);
+    await persistDeletionState();
     renderDayGrid();
     renderAll();
     selectDate(ds);
@@ -4411,11 +4444,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     let h=`<div class="editor-shell">
       <section class="editor-section">
         <div class="editor-grid">
-          <label class="editor-field"><span>DAY LABEL</span><input id="edit-label-input" class="fi" type="text" value="${getWorkoutDisplayLabel(key)}" placeholder="e.g. Day 2"></label>
+          <label class="editor-field"><span>DAY SLOT (AUTO)</span><input id="edit-label-input" class="fi" type="text" value="${getEditableWorkoutLabel(key)}" readonly></label>
           <label class="editor-field"><span>WORKOUT TITLE</span><input id="edit-title-input" class="fi" type="text" value="${day.title}" placeholder="e.g. Push"></label>
           <label class="editor-field editor-field-wide"><span>SUBTITLE / MUSCLE GROUPS</span><input id="edit-subtitle-input" class="fi" type="text" value="${day.subtitle}" placeholder="e.g. Chest · Shoulders · Triceps"></label>
           <label class="editor-field"><span>SCHEDULED WEEKDAY</span>
-        <select id="edit-weekday-input" class="fsel">
+        <select id="edit-weekday-input" class="fsel" onchange="syncEditDayLabel()">
           <option value="-1" ${day.weekday==null?'selected':''}>— No fixed day —</option>
           <option value="1" ${day.weekday===1?'selected':''}>Monday</option><option value="2" ${day.weekday===2?'selected':''}>Tuesday</option><option value="3" ${day.weekday===3?'selected':''}>Wednesday</option>
           <option value="4" ${day.weekday===4?'selected':''}>Thursday</option><option value="5" ${day.weekday===5?'selected':''}>Friday</option><option value="6" ${day.weekday===6?'selected':''}>Saturday</option><option value="0" ${day.weekday===0?'selected':''}>Sunday</option>
@@ -4444,6 +4477,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     document.getElementById("em").dataset.key=key;
     refreshEditRowIndices();
     closeCardMenu();
+  };
+  window.syncEditDayLabel=function(){
+    const modal=document.getElementById("em");
+    const key=modal?.dataset?.key;
+    const labelInput=document.getElementById("edit-label-input");
+    const weekdayInput=document.getElementById("edit-weekday-input");
+    if(!key || !labelInput || !weekdayInput) return;
+    const nextWeekday=parseInt(weekdayInput.value,10);
+    labelInput.value = getProjectedWorkoutDisplayLabel(key, nextWeekday>=0 ? nextWeekday : null);
   };
   window.closeEdit=()=>document.getElementById("em").style.display="none";
   window.addEditRow=function(){
@@ -4506,14 +4548,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   };
   window.saveEdit=async function(){
     const key=document.getElementById("em").dataset.key;
-    const newLabel=document.getElementById("edit-label-input").value.trim();
     const newTitle=document.getElementById("edit-title-input").value.trim();
     const newSubtitle=document.getElementById("edit-subtitle-input").value.trim();
     const newNotes=document.getElementById("edit-notes-input").value.trim();
     const newWeekday=parseInt(document.getElementById("edit-weekday-input")?.value??"-1",10);
     const hasBronwen=canManageWorkoutParticipants() ? !!document.getElementById("edit-participants-bronwen")?.checked : (WORKOUT_PLAN[key].participants||[]).includes("bronwen");
     if(!newTitle){toast("⚠️ Enter a title");return;}
-    WORKOUT_PLAN[key].label=newLabel || getWorkoutDisplayLabel(key);
+    delete WORKOUT_PLAN[key].label;
     WORKOUT_PLAN[key].title=newTitle;
     WORKOUT_PLAN[key].subtitle=newSubtitle;
     WORKOUT_PLAN[key].notes=newNotes||"";
@@ -4580,7 +4621,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const removedPrKeys = Object.keys(state.prs||{}).filter(prKey=>state.prs?.[prKey]?.dayKey===key);
     removedPrKeys.forEach(prKey=>{ delete state.prs[prKey]; });
     delete WORKOUT_PLAN[key]; normalizeWorkoutPlanOrder(); if(activeDay===key){activeDay=null;document.getElementById("day-panel").style.display="none";}
-    closeCardMenu(); renderDayGrid(); renderAll(); await saveData(); await deleteRemoteWorkoutDay(key, removedDates, removedPrKeys); toast(`🗑 ${day.title} deleted`);
+    closeCardMenu(); renderDayGrid(); renderAll(); await persistDeletionState(); toast(`🗑 ${day.title} deleted`);
   };
 
   // ─── ADD DAY ───
@@ -4624,7 +4665,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(Object.keys(WORKOUT_PLAN).length>=MAX_DAYS){toast("🛑 Max 10 days");return;}
     const templateKey=document.getElementById("adtemplate")?.value||"";
     const template=(state.savedWorkouts||{})[templateKey]||null;
-    let label=document.getElementById("adlbi")?.value.trim()||"";
     let title=document.getElementById("adi").value.trim().toUpperCase();
     const sub=document.getElementById("adsi").value.trim();
     const wd=parseInt(document.getElementById("adws").value);
@@ -4635,8 +4675,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const next=nums.length?Math.max(...nums)+1:1;
     const key=`day${next}`;
     const prefilledExercises=template?.exercises?deepCopy(template.exercises):[];
-    if(!label) label=`DAY ${next}`;
-    WORKOUT_PLAN[key]={label,order:next,weekday:wd>=0?wd:null,title,subtitle:sub||template?.subtitle||title,color:col,exercises:prefilledExercises,participants:['revan']};
+    WORKOUT_PLAN[key]={order:next,weekday:wd>=0?wd:null,title,subtitle:sub||template?.subtitle||title,color:col,exercises:prefilledExercises,participants:['revan']};
     normalizeWorkoutPlanOrder();
     closeAddDay(); renderDayGrid(); renderAll(); await saveData();
     if(prefilledExercises.length){
@@ -5648,11 +5687,34 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           const value = Number(raw || 0);
           if(!value) return;
           if(chart.config.type === "bar"){
+            if(opts?.stackTotals){
+              if(datasetIndex !== 0) return;
+              const total = chart.data.datasets.reduce((sum, ds)=>sum + Number((Array.isArray(ds.data) ? ds.data[index] : 0) || 0), 0);
+              if(!total) return;
+              const topY = chart.data.datasets.reduce((minY, _ds, dsIndex)=>{
+                const dsMeta = chart.getDatasetMeta(dsIndex);
+                const el = dsMeta?.data?.[index];
+                if(!el || dsMeta.hidden) return minY;
+                const props = el.getProps(["y"], true);
+                return Math.min(minY, props.y);
+              }, Number.POSITIVE_INFINITY);
+              const props = element.getProps(["x"], true);
+              drawText(total, props.x, topY - 10);
+              return;
+            }
             const props = element.getProps(["x","y","base"], true);
             const barHeight = Math.abs(props.base - props.y);
             const inside = !!opts?.barInside && barHeight > 24;
             const y = inside ? props.y + 12 : (props.y < props.base ? props.y - 10 : props.y + 10);
-            drawText(value, props.x, y, inside ? "#111" : "#f3f1ef");
+            if(opts?.barRotate){
+              ctx.save();
+              ctx.translate(props.x, y);
+              ctx.rotate((Number(opts.barRotate) * Math.PI) / 180);
+              drawText(value, 0, 0, inside ? "#111" : "#f3f1ef");
+              ctx.restore();
+            } else {
+              drawText(value, props.x, y, inside ? "#111" : "#f3f1ef");
+            }
             return;
           }
           if(chart.config.type === "doughnut"){

@@ -88,7 +88,7 @@
 <div class="hdr">
   <div class="logo"><span class="logo-brand"><span class="material-symbols-outlined logo-symbol">fitness_center</span>IRON<span class="logo-log">LOG</span></span></div>
   <div class="hdr-right">
-    <button class="hdr-icn-btn" onclick="toggleNotifications()" aria-label="Notifications"><span class="material-symbols-outlined">notifications</span></button>
+    <div id="header-datetime"></div>
   </div>
 </div>
 <div id="coverWorkoutPlayer">
@@ -249,7 +249,6 @@
     <section class="progress-cards">
       <div class="progress-card"><div class="chart-title">WEEKLY FREQUENCY</div><canvas id="freqChart"></canvas></div>
       <div class="progress-card"><div class="chart-title">SESSION BREAKDOWN</div><canvas id="volChart"></canvas></div>
-      <div class="progress-card"><div class="chart-title">VOLUME BY MUSCLE</div><canvas id="muscleVolChart"></canvas></div>
       <div class="progress-card"><div class="chart-title">BODYWEIGHT TREND (kg)</div><canvas id="bwChart"></canvas></div>
       <div class="progress-card"><div class="chart-title">SLEEP TREND (hrs)</div><canvas id="sleepChart"></canvas></div>
       <div id="month-comparison" class="progress-card progress-card-copy"></div>
@@ -452,7 +451,7 @@
           <option value="">— START BLANK —</option>
         </select>
       </div>
-      <div><div class="fl">DAY LABEL</div><input id="adlbi" class="fi" placeholder="e.g. Day 2"></div>
+      <div><div class="fl">DAY SLOT (AUTO)</div><input id="adlbi" class="fi" placeholder="Auto from order" readonly></div>
       <div><div class="fl">DAY NAME *</div><input id="adi" class="fi" placeholder="e.g. PUSH, FULL BODY"></div>
       <div><div class="fl">SUBTITLE / MUSCLES</div><input id="adsi" class="fi" placeholder="e.g. Chest · Shoulders"></div>
       <div><div class="fl">SCHEDULED WEEKDAY (optional)</div>
