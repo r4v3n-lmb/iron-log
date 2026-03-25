@@ -12,7 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.32";
+  const APP_VERSION = "v1.1.34";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -1805,7 +1805,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   // ─── RENDER ALL ───
   function renderAll(){
-    renderCalendar(); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions(); renderNotifications(); renderDashboardShell(); renderProfileShell(); renderVisualProgressGallery();
+    renderCalendar(); renderHistorySelectedSession(activeDate); renderHistoryMonthSummary(activeDate); renderStats(); renderCharts(); renderWeeklySummary(); renderHeatmap(); renderHealthChecklist(); renderPersonalRecordsWall(); render1RMCalculator(); renderMonthComparison(); renderExerciseOptions(); updateLogoColor(); renderQuickActions(); renderNotifications(); renderDashboardShell(); renderProfileShell(); renderVisualProgressGallery();
     if(activeDay)renderDayPanel(activeDay);
     sortedDayKeys().forEach(key=>{
       const w=state.workouts?.[activeDate]?.[key]; if(!w)return;
@@ -2116,24 +2116,29 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   function renderCalendar(){
     const cal=document.getElementById("calendar");
-    const now=new Date(activeDate+"T12:00:00"),yr=now.getFullYear(),mo=now.getMonth();
-    const fd=new Date(yr,mo,1).getDay(),dim=new Date(yr,mo+1,0).getDate();
-    const mn=["JANUARY","FEBRUARY","MARCH","APRIL","MAY","JUNE","JULY","AUGUST","SEPTEMBER","OCTOBER","NOVEMBER","DECEMBER"];
-    document.getElementById("month-label").textContent=`${mn[mo]} ${yr}`;
+    if(!cal) return;
+    const now=new Date(`${activeDate}T12:00:00`),yr=now.getFullYear(),mo=now.getMonth();
+    const first=new Date(yr,mo,1,12);
+    const firstOffset=(first.getDay()+6)%7;
+    const gridStart=new Date(first);
+    gridStart.setDate(first.getDate()-firstOffset);
+    document.getElementById("month-label").textContent=formatHistoryMonthLabel(activeDate);
     let h=`<div class="cal-grid">`;
-    ["SU","MO","TU","WE","TH","FR","SA"].forEach(d=>h+=`<div class="cal-hc">${d}</div>`);
-    for(let i=0;i<fd;i++)h+=`<div class="cal-cell empty"></div>`;
+    ["MON","TUE","WED","THU","FRI","SAT","SUN"].forEach(d=>h+=`<div class="cal-hc">${d}</div>`);
     const today=getTodayStr();
-    for(let d=1;d<=dim;d++){
-      const ds=`${yr}-${String(mo+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+    for(let i=0;i<42;i++){
+      const cellDate=new Date(gridStart);
+      cellDate.setDate(gridStart.getDate()+i);
+      const ds=cellDate.toISOString().split("T")[0];
       const isT=ds===today,isA=ds===activeDate,isFut=ds>today;
       const visible = getCalendarWorkedMeta(ds);
       const worked = visible.worked;
       const otherUserColor = visible.otherUserColor;
       const dc=otherUserColor;
       const bday=isBirthday(ds);
-      h+=`<div class="cal-cell ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''} ${isFut?'future':''} ${bday?'bday':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
-        <span class="cal-n">${d}</span>
+      const outMonth=cellDate.getMonth()!==mo;
+      h+=`<div class="cal-cell ${outMonth?'empty':''} ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''} ${isFut?'future':''} ${bday?'bday':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
+        <span class="cal-n">${cellDate.getDate()}</span>
         ${dc?`<span class="cal-dot" style="background:${dc}"></span>`:''}
         ${bday?`<span class="cal-bd">🎂</span>`:''}
       </div>`;
@@ -3588,48 +3593,166 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     panel.style.display="block";
     syncWorkoutFocusState();
   }
+  function formatHistoryDayName(ds){
+    return new Date(`${ds}T12:00:00`).toLocaleDateString("en-ZA",{weekday:"long"});
+  }
+  function formatHistoryMonthLabel(ds){
+    return new Date(`${ds}T12:00:00`).toLocaleDateString("en-ZA",{month:"long",year:"numeric"}).toUpperCase();
+  }
+  function formatClockLabel(value){
+    if(!value || !/^\d{2}:\d{2}$/.test(String(value))) return "";
+    const [hh, mm] = String(value).split(":").map(Number);
+    const d = new Date();
+    d.setHours(hh || 0, mm || 0, 0, 0);
+    return d.toLocaleTimeString("en-ZA",{hour:"numeric",minute:"2-digit"});
+  }
+  function getSessionTimeLabel(ds, key){
+    const timeEntry = getWorkoutTimeEntry(ds, key, activeProfile) || {};
+    const at = formatClockLabel(timeEntry.at || "");
+    const mins = parseInt(timeEntry.durationMins || timeEntry.trackedMins || 0, 10) || 0;
+    if(at && mins > 0){
+      const [hh, mm] = String(timeEntry.at).split(":").map(Number);
+      const end = new Date(`${ds}T12:00:00`);
+      end.setHours(hh || 0, mm || 0, 0, 0);
+      end.setMinutes(end.getMinutes() + mins);
+      return `${at} - ${end.toLocaleTimeString("en-ZA",{hour:"numeric",minute:"2-digit"})}`;
+    }
+    if(at) return at;
+    if(mins > 0) return `${mins} mins`;
+    return "Time not logged";
+  }
+  function getHistoryExerciseLines(ds, key){
+    const wo = state.workouts?.[ds]?.[key];
+    const day = WORKOUT_PLAN[key];
+    if(!wo || !day) return [];
+    return (day.exercises || []).map(ex=>{
+      const { data } = getExData(wo.exercises || {}, activeProfile, ex.name);
+      if(!data) return null;
+      const hasActivity = data.checked || parseFloat(data.weight || 0) > 0 || parseFloat(data.actualReps || 0) > 0 || (Array.isArray(data.coverSets) && data.coverSets.length);
+      if(!hasActivity) return null;
+      const setsLogged = Array.isArray(data.coverSets) && data.coverSets.length ? data.coverSets.length : (data.checked ? getExerciseTargetSets(ex) : 0);
+      const weight = parseFloat(data.weight || 0);
+      const reps = parseInt(data.actualReps || ex.reps || 0, 10) || 0;
+      let meta = `${Math.max(setsLogged, ex.sets || 0)} sets`;
+      if(weight > 0) meta += ` × ${weight} kg`;
+      else if(reps > 0) meta += ` × ${reps} reps`;
+      return { name: data.customName || ex.name, meta };
+    }).filter(Boolean);
+  }
+  function getDayPrCount(ds, key){
+    return Object.keys(state.prs || {}).filter(prKey=>{
+      const pr = state.prs?.[prKey];
+      const participant = pr?.participant || (String(prKey).includes("_") ? String(prKey).split("_")[0] : activeProfile);
+      return participant === activeProfile && pr?.date === ds && pr?.dayKey === key;
+    }).length;
+  }
   function getCalendarDayEntries(ds){
     return Object.keys(state.workouts?.[ds] || {}).map(key=>{
       const wo = state.workouts?.[ds]?.[key];
       const day = WORKOUT_PLAN[key];
       if(!wo || !day) return null;
       if(!sessionHasActivityForParticipant(wo, key, activeProfile)) return null;
-      const exercises = Object.keys(wo.exercises || {}).filter(exKey=>{
-        const owner = String(exKey || "").includes("_") ? String(exKey).split("_")[0] : activeProfile;
-        return owner === activeProfile;
-      }).length;
+      const exerciseLines = getHistoryExerciseLines(ds, key);
       return {
         key,
+        wo,
         day,
         note: wo.notes || "",
         tonnage: calcSessionTonnage(ds, key),
-        exercises
+        exercises: exerciseLines.length,
+        exerciseLines,
+        prCount: getDayPrCount(ds, key),
+        timeLabel: getSessionTimeLabel(ds, key),
+        durationMins: parseInt(getWorkoutTimeEntry(ds, key, activeProfile)?.durationMins || 0, 10) || 0
       };
     }).filter(Boolean);
   }
-  function openCalendarDayModal(ds){
-    const modal = document.getElementById("calendar-day-modal");
-    const body = document.getElementById("calendar-day-modal-body");
-    const title = document.getElementById("calendar-day-modal-title");
-    if(!modal || !body || !title) return;
-    calendarDayModalDate = ds;
-    title.textContent = formatDate(ds);
+  function renderHistorySelectedSession(ds=activeDate){
+    const el = document.getElementById("history-selected-session");
+    if(!el) return;
     const entries = getCalendarDayEntries(ds);
-    body.innerHTML = entries.length ? entries.map(entry=>`
-      <div class="calendar-day-entry">
-        <div class="calendar-day-entry-copy">
-          <strong style="color:${entry.day.color}">${entry.day.label} · ${entry.day.title}</strong>
-          <span>${entry.day.subtitle || "Workout"}</span>
-          <span>${entry.exercises} exercise log${entry.exercises===1?"":"s"}${entry.tonnage>0?` · ${entry.tonnage}kg moved`:""}</span>
-          ${entry.note ? `<p>${entry.note}</p>` : ""}
+    const dayName = formatHistoryDayName(ds);
+    const title = new Date(`${ds}T12:00:00`).toLocaleDateString("en-ZA",{month:"long",day:"numeric"}).toUpperCase();
+    const cards = entries.length ? entries.map(entry=>`
+      <article class="history-session-card" style="border-left-color:${entry.day.color}">
+        <div class="history-session-body">
+          <div class="history-session-head">
+            <div>
+              <div class="history-session-title">${entry.day.title}${entry.day.subtitle ? `: ${entry.day.subtitle}` : ""}</div>
+              <div class="history-session-time"><span class="material-symbols-outlined">schedule</span>${entry.timeLabel}</div>
+            </div>
+            <div class="history-session-actions">
+              <button type="button" aria-label="Edit session" onclick="openCalendarDayWorkout('${ds}','${entry.key}')"><span class="material-symbols-outlined">edit</span></button>
+              <button type="button" class="delete" aria-label="Delete session" onclick="deleteWorkoutHistoryEntry('${ds}','${entry.key}')"><span class="material-symbols-outlined">delete</span></button>
+            </div>
+          </div>
+          <div class="history-metric-grid">
+            <div class="history-metric-card"><span>Total Volume</span><strong style="color:${entry.day.color}">${entry.tonnage.toLocaleString()} <em>KG</em></strong></div>
+            <div class="history-metric-card"><span>Duration</span><strong>${entry.durationMins || "—"} <em>${entry.durationMins ? "MINS" : ""}</em></strong></div>
+            <div class="history-metric-card"><span>Exercises</span><strong>${entry.exercises} <em>TOTAL</em></strong></div>
+            <div class="history-metric-card"><span>Personal Records</span><strong style="color:${entry.prCount ? "#ffd166" : "var(--text)"}">${entry.prCount} <em>NEW</em></strong></div>
+          </div>
+          <div class="history-exercise-list">
+            ${(entry.exerciseLines.length ? entry.exerciseLines.slice(0,4) : [{name:"No exercise lines logged",meta:""}]).map(line=>`
+              <div class="history-exercise-row">
+                <div><span class="history-exercise-dot"></span><span class="history-exercise-name">${line.name}</span></div>
+                <span class="history-exercise-meta">${line.meta || ""}</span>
+              </div>
+            `).join("")}
+            ${entry.note ? `<div class="calendar-day-entry-copy"><p>${entry.note}</p></div>` : ""}
+          </div>
         </div>
-        <div class="calendar-day-entry-actions">
-          <button class="st-ab" onclick="openCalendarDayWorkout('${ds}','${entry.key}')">EDIT</button>
-          <button class="st-ab template-btn-del" onclick="deleteWorkoutHistoryEntry('${ds}','${entry.key}')">DELETE</button>
+        <div class="history-session-image"><img src="${STITCH_ASSETS.activeWorkout}" alt="Workout session background"></div>
+      </article>
+    `).join("") : `<div class="history-empty-card">No workout activity is logged for this day yet. Select a different date or complete a session to populate history here.</div>`;
+    el.innerHTML = `
+      <div class="history-selected-head">
+        <div>
+          <span class="history-selected-kicker">Selected Session</span>
+          <div class="history-selected-title">${title}</div>
+        </div>
+        <div class="history-selected-dayname">${dayName}</div>
+      </div>
+      ${cards}
+    `;
+  }
+  function renderHistoryMonthSummary(ds=activeDate){
+    const el = document.getElementById("history-month-summary");
+    if(!el) return;
+    const current = new Date(`${ds}T12:00:00`);
+    const yr = current.getFullYear();
+    const mo = current.getMonth();
+    const daysInMonth = new Date(yr, mo + 1, 0).getDate();
+    let planned = 0;
+    let completed = 0;
+    for(let day=1; day<=daysInMonth; day++){
+      const date = new Date(yr, mo, day, 12);
+      const dateStr = date.toISOString().split("T")[0];
+      const weekday = date.getDay();
+      sortedDayKeys().forEach(key=>{
+        const workout = WORKOUT_PLAN[key];
+        if(!workout?.participants?.includes(activeProfile)) return;
+        if(workout.weekday !== weekday) return;
+        planned++;
+        if(sessionHasActivityForParticipant(state.workouts?.[dateStr]?.[key], key, activeProfile)) completed++;
+      });
+    }
+    const pct = planned > 0 ? Math.round((completed / planned) * 100) : 0;
+    const band = pct >= 75 ? "High" : pct >= 50 ? "Medium" : "Low";
+    el.innerHTML = `
+      <div class="history-summary-label">Month Summary</div>
+      <div class="history-summary-card">
+        <div style="position:relative">
+          <div class="history-ring" style="--pct:${pct}"></div>
+          <div class="history-ring-value">${pct}%</div>
+        </div>
+        <div class="history-summary-copy">
+          <span>Consistency</span>
+          <strong>${band}</strong>
+          <p>You've hit <strong>${completed}/${planned || 0}</strong> planned sessions in ${formatHistoryMonthLabel(ds)}.</p>
         </div>
       </div>
-    `).join("") : `<div class="activity-empty">No workout activity logged for this day.</div>`;
-    modal.style.display = "flex";
+    `;
   }
   window.closeCalendarDayModal=function(){
     const modal = document.getElementById("calendar-day-modal");
@@ -3637,7 +3760,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     calendarDayModalDate = "";
   };
   window.openCalendarDayWorkout=function(ds,key){
-    closeCalendarDayModal();
     activeDate = ds;
     selectDay(key);
   };
@@ -3655,8 +3777,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderCalendar();
     renderStats();
     renderCharts();
-    renderDateSummary(ds);
-    openCalendarDayModal(ds);
+    renderHistorySelectedSession(ds);
+    renderHistoryMonthSummary(ds);
     await saveData();
   };
 
@@ -3682,7 +3804,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     document.querySelectorAll(".day-card").forEach(c=>c.classList.remove("active"));
     syncWorkoutFocusState();
     hideCoverPlayer();
-    renderCalendar(); renderDateSummary(ds); openCalendarDayModal(ds);
+    renderCalendar(); renderHistorySelectedSession(ds); renderHistoryMonthSummary(ds);
   };
   window.selectDay=function(key){
     activeDay=key; panelCollapsed=false;
@@ -4027,8 +4149,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     }
   }
 
-  window.prevMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()-1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderStats();renderCharts(); };
-  window.nextMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()+1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderStats();renderCharts(); };
+  window.prevMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()-1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderHistorySelectedSession(activeDate);renderHistoryMonthSummary(activeDate);renderStats();renderCharts(); };
+  window.nextMonth=function(){ const d=new Date(activeDate+"T12:00:00");d.setMonth(d.getMonth()+1);activeDate=d.toISOString().split("T")[0];renderCalendar();renderHistorySelectedSession(activeDate);renderHistoryMonthSummary(activeDate);renderStats();renderCharts(); };
 
   // ─── EDIT MODAL ───
   window.openEdit=function(key){

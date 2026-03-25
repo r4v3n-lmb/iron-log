@@ -262,16 +262,22 @@
       <div id="pr-wall"></div>
     </section>
 
-    <section class="progress-section-block">
+    <section class="progress-section-block history-block">
       <div class="dashboard-section-head">
-        <h3>Calendar</h3>
+        <h3>History</h3>
       </div>
-      <div class="cal-nav">
-        <button onclick="prevMonth()">&#8592;</button>
-        <span id="month-label"></span>
-        <button onclick="nextMonth()">&#8594;</button>
+      <div class="history-calendar-card">
+        <div class="history-calendar-head">
+          <div class="history-calendar-month" id="month-label"></div>
+          <div class="history-calendar-nav">
+            <button type="button" aria-label="Previous month" onclick="prevMonth()"><span class="material-symbols-outlined">chevron_left</span></button>
+            <button type="button" aria-label="Next month" onclick="nextMonth()"><span class="material-symbols-outlined">chevron_right</span></button>
+          </div>
+        </div>
+        <div id="calendar"></div>
       </div>
-      <div id="calendar"></div>
+      <div id="history-selected-session" class="history-selected-shell"></div>
+      <div id="history-month-summary" class="history-month-summary"></div>
     </section>
 
     <section class="progress-section-block">
