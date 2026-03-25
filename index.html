@@ -329,8 +329,9 @@
   <div class="sth">
     <div class="sth-left">
       <span class="sttl">⚙ SETTINGS</span>
-      <button class="st-refresh-btn" type="button" onclick="refreshAppAndClearCache()" aria-label="Refresh app and clear cache">
-        <span class="material-symbols-outlined">refresh</span>
+      <button class="st-refresh-btn" type="button" onclick="reloadAppShell()" aria-label="Reload app without clearing local data" title="Reload app">
+        <span class="material-symbols-outlined">sync</span>
+        <span class="st-refresh-label">Reload</span>
       </button>
     </div>
     <button class="stcb" onclick="closeSettings()">×</button>
@@ -345,6 +346,7 @@
     <div class="stst stst-toggle" onclick="toggleSettingsSection('data')"><span>// DATA</span><span class="st-arrow" id="st-arrow-data">▾</span></div>
     <div class="st-body">
       <button class="st-ab" onclick="pushUpdatesNow()" style="color:#60a5fa;border-color:rgba(96,165,250,.35)">☁ PUSH UPDATES NOW</button>
+      <button class="st-ab" onclick="refreshAppAndClearCache()" style="color:#ffb4c0;border-color:rgba(244,63,94,.35)">♻ CLEAR LOCAL CACHE & RELOAD</button>
       <button class="st-ab" onclick="cleanupDuplicatePRs()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">🧹 CLEAN DUPLICATE PRS</button>
       <button class="st-ab" onclick="exportCSV()">📥 EXPORT CSV</button>
       <label class="st-ab" style="cursor:pointer">📤 IMPORT CSV<input type="file" id="cii" accept=".csv" style="display:none"></label>

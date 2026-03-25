@@ -12,7 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.39";
+  const APP_VERSION = "v1.1.40";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -114,6 +114,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       visualProgress: Array.isArray(state.visualProgress) ? state.visualProgress : [],
       savedAt: new Date().toISOString()
     };
+  }
+  function hasKeys(value){
+    return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0;
+  }
+  function pickRecord(primary, fallback){
+    if(hasKeys(primary)) return primary;
+    if(hasKeys(fallback)) return fallback;
+    if(primary && typeof primary === "object" && !Array.isArray(primary)) return primary;
+    if(fallback && typeof fallback === "object" && !Array.isArray(fallback)) return fallback;
+    return {};
   }
   function saveLocalSnapshot(profileKey=activeProfile){
     try{ localStorage.setItem(getSnapshotStorageKey(profileKey), JSON.stringify(buildLocalSnapshot())); }catch(_e){}
@@ -820,19 +830,32 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           const pd = d.profileData || {};
           const legacyPd = d[`profileData.${activeProfile}`] || {};
           const profileData = pd[activeProfile] || legacyPd || {};
+          const sharedPlan = pickRecord(d.plan, profileData.plan);
+          const sharedWorkouts = pickRecord(d.workouts, profileData.workouts);
+          const scopedPrs = pickRecord(profileData.prs, d.prs);
+          const scopedSavedWorkouts = pickRecord(profileData.savedWorkouts, d.savedWorkouts);
+          const hasSharedPlan = hasKeys(d.plan);
+          const hasSharedWorkouts = hasKeys(d.workouts);
+          const hasSharedPrs = hasKeys(d.prs);
+          const hasSharedSavedWorkouts = hasKeys(d.savedWorkouts);
+          const hasProfilePlan = hasKeys(profileData.plan);
+          const hasProfileWorkouts = hasKeys(profileData.workouts);
           const hasScopedData = !!(
-            profileData.plan ||
-            profileData.workouts ||
-            profileData.prs ||
-            profileData.savedWorkouts ||
+            hasProfilePlan ||
+            hasProfileWorkouts ||
+            hasKeys(profileData.prs) ||
+            hasKeys(profileData.savedWorkouts) ||
             profileData.gymUrl ||
-            profileData.bodyweight ||
-            profileData.health
+            hasKeys(profileData.bodyweight) ||
+            hasKeys(profileData.health) ||
+            hasKeys(profileData.exerciseMeta) ||
+            hasKeys(profileData.userOverrides) ||
+            (Array.isArray(profileData.visualProgress) && profileData.visualProgress.length)
           );
-          WORKOUT_PLAN = d.plan ? deepCopy(d.plan) : (profileData.plan ? deepCopy(profileData.plan) : seedPlan(activeProfile));
-          state.workouts      = d.workouts      || profileData.workouts      || {};
-          state.prs           = profileData.prs           || d.prs           || {};
-          state.savedWorkouts = profileData.savedWorkouts || d.savedWorkouts || {};
+          WORKOUT_PLAN = hasKeys(sharedPlan) ? deepCopy(sharedPlan) : seedPlan(activeProfile);
+          state.workouts      = pickRecord(sharedWorkouts, {});
+          state.prs           = scopedPrs;
+          state.savedWorkouts = scopedSavedWorkouts;
           state.gymUrl        = profileData.gymUrl        || d.gymUrl        || "";
           state.allUserWorkouts = activeProfile === "revan" ? pd : null;
           normalizeWorkoutPlanOrder();
@@ -846,9 +869,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           state.visualProgress = Array.isArray(profileData.visualProgress) ? profileData.visualProgress : [];
           applyUserOverrides(state.userOverrides);
           saveLocalSnapshot(activeProfile);
-          if((!d.plan && profileData.plan) || (!d.workouts && profileData.workouts)) saveData();
-          if(!profileData.plan && !d.plan && Object.keys(WORKOUT_PLAN||{}).length) saveData();
-          if(activeProfile === "revan" && !hasScopedData && (d.plan || d.workouts || d.prs || d.savedWorkouts || d.gymUrl)) saveData();
+          if((!hasSharedPlan && hasProfilePlan) || (!hasSharedWorkouts && hasProfileWorkouts)) saveData();
+          if(!hasProfilePlan && !hasSharedPlan && Object.keys(WORKOUT_PLAN||{}).length) saveData();
+          if(activeProfile === "revan" && !hasScopedData && (hasSharedPlan || hasSharedWorkouts || hasSharedPrs || hasSharedSavedWorkouts || d.gymUrl)) saveData();
           if(hasAppUpdate() && lastUpdateToastVersion!==latestAppVersion){
             lastUpdateToastVersion = latestAppVersion;
             toast(`⬆ Update ${latestAppVersion} available in Settings`);
@@ -2377,8 +2400,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const progressFrequency = document.getElementById("progress-frequency");
     const progressPrs = document.getElementById("progress-pr-count");
     const progressVolumeLabel = document.getElementById("progress-volume-label");
+    const weeklyFreq = getWeeklyFreq();
+    const totalWeeklySessions = weeklyFreq.totals.reduce((sum,n)=>sum+n,0);
+    const avgWeeklySessions = totalWeeklySessions ? (totalWeeklySessions / Math.max(weeklyFreq.totals.length,1)).toFixed(1) : "0.0";
     if(workoutsMonth) workoutsMonth.textContent = String(daysWorked).padStart(2,"0");
-    if(progressFrequency) progressFrequency.textContent = getWeeklyFreq().c.reduce((sum,n)=>sum+n,0) ? (getWeeklyFreq().c.reduce((sum,n)=>sum+n,0)/Math.max(getWeeklyFreq().c.length,1)).toFixed(1) : "0.0";
+    if(progressFrequency) progressFrequency.textContent = avgWeeklySessions;
     if(progressPrs) progressPrs.textContent = getPersonalRecords().length;
     if(progressVolumeLabel) progressVolumeLabel.textContent = t>=1000 ? `${(t/1000).toFixed(1)} TONS TOTAL` : `${t} KG TOTAL`;
   }
@@ -5088,10 +5114,20 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderSettingsProfiles(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderInstallSettingsBlock(); renderSettingsSectionUI();
   };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
+  window.reloadAppShell=async function(){
+    try{
+      if(hasPendingSync(activeProfile)) await saveData();
+    }catch(_e){}
+    closeSettings();
+    const url = new URL(window.location.href);
+    url.searchParams.set("refresh", Date.now().toString());
+    window.location.replace(url.toString());
+  };
   window.refreshAppAndClearCache=async function(){
     const confirmed = confirm("Refresh Iron Log and clear this device cache first?");
     if(!confirmed) return;
     try{
+      if(hasPendingSync(activeProfile)) await saveData();
       closeSettings();
       const localKeys = [];
       for(let i=0;i<localStorage.length;i++){
