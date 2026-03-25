@@ -1,21 +1,24 @@
 # IRON LOG
 
-A modular workout tracking app with Firebase backend. Develop with separated files, build into a single HTML file for distribution.
+A modular workout tracking PWA with Firebase backend. Edit the source app in `src/`, then build a clean deployable site into `dist/`.
 
 ## Project Structure
 
 ```
 ironlog/
 ├── src/
-│   ├── index.html           # Main HTML structure
+│   ├── index.html           # Main app shell
+│   ├── manifest.json        # PWA manifest
+│   ├── service-worker.js    # PWA cache/offline logic
 │   ├── css/
-│   │   └── styles.css       # All styling
-│   └── js/
-│       ├── app.js           # Main application logic
-│       └── firebase.js      # Firebase configuration
-├── dist/
-│   └── ironlog.html         # Generated bundled file (for distribution)
-├── build.js                 # Build script
+│   │   └── styles.css       # App styling
+│   ├── js/
+│   │   └── app.js           # Main application logic
+│   └── icons/
+│       ├── icon-192.png
+│       └── icon-512.png
+├── dist/                    # Generated deployable site
+├── build.js                 # Build/copy script
 ├── package.json
 ├── .gitignore
 └── README.md
@@ -39,62 +42,51 @@ ironlog/
 During development, edit files in the `src/` folder:
 - **HTML changes**: Edit `src/index.html`
 - **CSS changes**: Edit `src/css/styles.css`  
-- **JS changes**: Edit `src/js/app.js` or `src/js/firebase.js`
+- **JS changes**: Edit `src/js/app.js`
 
 ## Building
 
-To bundle all files into a single HTML file for distribution:
+To generate the deployable PWA bundle:
 
 ```bash
 npm run build
 ```
 
-This creates `dist/ironlog.html` — a single, standalone HTML file with everything inlined. You can send this file to anyone and it will work immediately without any dependencies.
+This creates a fresh `dist/` folder containing:
+
+- `dist/index.html`
+- `dist/ironlog.html`
+- `dist/css/styles.css`
+- `dist/js/app.js`
+- `dist/manifest.json`
+- `dist/service-worker.js`
+- `dist/icons/*`
 
 ## Distribution
 
-**For end users:**
-1. Simply share `dist/ironlog.html`
-2. Users open it in any browser
-3. Works on desktop, tablet, mobile
+**For deployment:**
+1. Run `npm run build`
+2. Publish the generated `dist/` folder
 
-**For developers:**
-1. Share the entire `src/` folder with `package.json`
-2. They can run `npm install && npm run build`
-3. Or edit files directly in `src/` for development
+**For development:**
+1. Work in `src/`
+2. Run `npm run build` before publishing
 
 ## Features
 
 - ✓ Workout tracking with Calendar view
 - ✓ Exercise logging with PR tracking
 - ✓ Health metrics (water, protein, supplements)
-- ✓ Dashboard with charts and heatmap
+- ✓ Dashboard with charts and weekly tracking
 - ✓ Multi-user support (Revan, Bronwen + others)
 - ✓ CSV export/import
 - ✓ Light/Dark theme
 - ✓ Responsive mobile design
 
-## Security Note
-
-⚠️ **Current Setup:** Firebase config is visible in the HTML source code. For production with sensitive data:
-1. Move to backend server (Node.js/Express)
-2. Backend handles all Firebase operations
-3. Frontend makes API requests only
-4. API keys never exposed to clients
-
-Example:
-```javascript
-// Current (exposed) ❌
-const firebaseConfig = { apiKey: "...", ... };
-
-// Future (secure) ✓
-fetch('/api/workouts').then(r => r.json())
-```
-
 ## Commands
 
-- `npm run build` - Build single HTML file to `dist/ironlog.html`
-- `npm run dev` - (Future: Watch mode for automatic rebuilds)
+- `npm run build` - Rebuild the deployable `dist/` site
+- `npm run dev` - Alias for the build script
 
 ## Tech Stack
 
@@ -103,6 +95,7 @@ fetch('/api/workouts').then(r => r.json())
 - **JavaScript (ES6+)** - Logic with modules
 - **Firebase Firestore** - Database & sync
 - **Chart.js** - Graphs & visualizations
+- **PWA APIs** - Installability, caching, offline shell
 
 ## Browser Support
 

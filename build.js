@@ -28,6 +28,7 @@ function copyPath(from, to) {
 }
 
 function build() {
+  fs.rmSync(distDir, { recursive: true, force: true });
   ensureDir(distDir);
   copyTargets.forEach(({ from, to }) => copyPath(from, to));
   console.log(`✓ Built deployable PWA bundle to ${distDir}`);

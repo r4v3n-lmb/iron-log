@@ -28,7 +28,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   const PREMADE = new Set();
   // seedPlan is ONLY used as a fallback if Firebase returns nothing
   function seedPlan(_pk){ return deepCopy(DEFAULT_PLAN); }
-  function canUseLegacySharedFallback(){ return false; }
 
   const MAX_DAYS = 10;
   let WORKOUT_PLAN = {};
@@ -69,7 +68,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   let adminTablesCache = null;
   let notificationsOpen = false;
   let notificationsSeen = {};
-  let calendarDayModalDate = "";
   let settingsSectionState = {
     user: false,
     data: false,
@@ -98,7 +96,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   const FIRESTORE_SPARK_LIMIT_BYTES = 1024 * 1024 * 1024;
   const isMobile = ()=>window.innerWidth <= 600;
   const isCoverScreen = ()=>window.innerWidth <= 420 && window.innerHeight <= 900;
-  const isFlip = ()=>isCoverScreen();
 
   const ACCOUNTS_DOC = "accounts";
   function getSnapshotStorageKey(profileKey=activeProfile){ return `ironlog_pwa_snapshot_${profileKey}`; }
@@ -440,6 +437,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   // SESSION TIMER
   let sessionInterval=null, sessionStart=null, sessionPaused=false, sessionPausedAt=0;
+  let restTimerInterval=null, restTimerEndsAt=null, restTimerRemainingMs=0, restTimerPaused=false;
 
   function startSessionTimer(){
     if(sessionInterval&&!sessionPaused) return;
@@ -562,6 +560,86 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       return diff !== 0 ? diff : String(a).localeCompare(String(b));
     });
   }
+  function getRestTimerRemaining(){
+    if(restTimerEndsAt && !restTimerPaused){
+      return Math.max(0, restTimerEndsAt - Date.now());
+    }
+    return Math.max(0, restTimerRemainingMs || 0);
+  }
+  function getRestTimerDisplayText(){
+    const remaining = getRestTimerRemaining();
+    if(!remaining) return "Ready";
+    const secs = Math.ceil(remaining / 1000);
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+  }
+  function updateRestTimerDisplay(){
+    const text = getRestTimerDisplayText();
+    ["rest-display-active"].forEach(id=>{
+      const el=document.getElementById(id);
+      if(el) el.textContent=text;
+    });
+  }
+  function clearRestTimer(finished=false){
+    clearInterval(restTimerInterval);
+    restTimerInterval=null;
+    restTimerEndsAt=null;
+    restTimerRemainingMs=0;
+    restTimerPaused=false;
+    updateRestTimerDisplay();
+    const toggleBtn=document.getElementById("rest-toggle-active");
+    if(toggleBtn) toggleBtn.textContent="Pause";
+    if(finished){
+      try{ navigator.vibrate?.([120,50,120]); }catch(_e){}
+      toast("⏱ Rest complete");
+    }
+  }
+  function tickRestTimer(){
+    const remaining = getRestTimerRemaining();
+    if(remaining<=0){
+      clearRestTimer(true);
+      return;
+    }
+    updateRestTimerDisplay();
+  }
+  window.startRestTimerPreset=function(seconds){
+    const secs=Math.max(15,parseInt(seconds||0,10)||0);
+    if(!secs) return;
+    clearInterval(restTimerInterval);
+    restTimerPaused=false;
+    restTimerRemainingMs=secs*1000;
+    restTimerEndsAt=Date.now()+restTimerRemainingMs;
+    restTimerInterval=setInterval(tickRestTimer,250);
+    updateRestTimerDisplay();
+    const toggleBtn=document.getElementById("rest-toggle-active");
+    if(toggleBtn) toggleBtn.textContent="Pause";
+  };
+  window.toggleRestTimerPause=function(){
+    if(!restTimerInterval && !restTimerPaused){
+      if(restTimerRemainingMs>0){
+        window.startRestTimerPreset(Math.ceil(restTimerRemainingMs/1000));
+      }
+      return;
+    }
+    if(restTimerPaused){
+      restTimerPaused=false;
+      restTimerEndsAt=Date.now()+restTimerRemainingMs;
+      restTimerInterval=setInterval(tickRestTimer,250);
+    } else {
+      restTimerRemainingMs=getRestTimerRemaining();
+      restTimerPaused=true;
+      clearInterval(restTimerInterval);
+      restTimerInterval=null;
+      restTimerEndsAt=null;
+    }
+    updateRestTimerDisplay();
+    const toggleBtn=document.getElementById("rest-toggle-active");
+    if(toggleBtn) toggleBtn.textContent=restTimerPaused?"Resume":"Pause";
+  };
+  window.clearRestTimer=function(){
+    clearRestTimer(false);
+  };
   function normalizeWorkoutPlanOrder(){
     sortedDayKeys().forEach((key, index)=>{
       if(!WORKOUT_PLAN[key]) return;
@@ -1598,6 +1676,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     });
     return rows.slice(-limit);
   }
+  function getLastExerciseSession(key, exName, participant="revan"){
+    const rows=getExerciseSessions(key, exName, participant, 1);
+    return rows.length ? rows[rows.length-1] : null;
+  }
   function getProgressInsight(key,ex,participant="revan"){
     if(!ex || ex.sets===0) return null;
     const target=parseInt(ex.reps||0,10)||0;
@@ -2020,7 +2102,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           <h3>WEEKLY TRACKER</h3>
           <span>${pct}%</span>
         </div>
-        <div class="consistency-bars stitch-consistency-bars">
+        <div class="consistency-bars">
           ${days.map(day=>`
             <button class="consistency-pill ${day.worked ? "done" : ""} ${day.isToday ? "today" : ""}" onclick="navTo('progress');selectDate('${day.date}')">
               <strong>${day.label}</strong>
@@ -2955,7 +3037,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     participants.forEach(p=>{ day.exercises.forEach(ex=>{ const {data:_ed}=getExData(wo.exercises,p,ex.name); if(_ed?.checked)done++; }); });
     const pct=total>0?Math.round(done/total*100):0;
     const ton=calcSessionTonnage(activeDate,key);
-    const activeExerciseIndex=Math.max(0, day.exercises.findIndex(ex=>participants.some(pp=>!getExData(wo.exercises,pp,ex.name).data?.checked)));
+    const activeExerciseIndex=Math.max(0, day.exercises.findIndex(ex=>!getExerciseCompletionState(wo,participants,ex.name).allDone));
     const activeExercise=day.exercises[activeExerciseIndex] || day.exercises[0] || null;
     const canReorderQueue=isEditable;
     const queue=(day.exercises||[]).map((ex,index)=>({ ex, index, ...getExerciseCompletionState(wo,participants,ex.name) }));
@@ -2969,7 +3051,18 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const participantCards=activeExercise ? displayedParticipants.map(pp=>{
       const {key:exKey,data:edRaw}=getExData(wo.exercises,pp,activeExercise.name);
       const ed=edRaw||{};
+      const skipped=!!ed.skipped;
       const lastWeight=getLastWeight(key,activeExercise.name,pp);
+      const lastSession=getLastExerciseSession(key,activeExercise.name,pp);
+      const progressInsight=getProgressInsight(key,activeExercise,pp);
+      const overloadSuggestion=getOverloadSuggestion(key,activeExercise,pp);
+      const guidanceText = progressInsight?.kind==="next"
+        ? `${progressInsight.note} · Try ${progressInsight.suggestedWeight}kg`
+        : progressInsight?.kind==="plateau"
+          ? progressInsight.note
+          : overloadSuggestion
+            ? `Increase to ${overloadSuggestion.suggestedWeight}kg next session`
+            : (lastSession ? "Match or beat last session" : "Log a clean first session");
       const currentWeight=parseFloat(ed.weight||lastWeight?.weight||20) || 20;
       const currentReps=parseInt(ed.actualReps||activeExercise.reps||8,10) || 8;
       const setHistory=Array.isArray(ed.coverSets)?ed.coverSets:[];
@@ -2981,7 +3074,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const pcolor=PROFILES[pp]?.color||'#888';
       return `<section class="active-participant-card ${ed.checked?'complete':''}" style="--participant:${pcolor}">
         <div class="active-participant-head">
-          <div><span class="active-participant-name">${PROFILES[pp]?.label||pp}</span><span class="active-participant-meta">${ed.checked?'Exercise complete':`${loggedSets}/${targetSets} sets logged`}</span></div>
+          <div><span class="active-participant-name">${PROFILES[pp]?.label||pp}</span><span class="active-participant-meta">${skipped?`Skipped${ed.skipReason?` · ${ed.skipReason}`:""}`:(ed.checked?'Exercise complete':`${loggedSets}/${targetSets} sets logged`)}</span></div>
           <div class="active-participant-time">
             <input type="time" class="active-inline-input" value="${ptime.at||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutTimeAt('${key}','${pp}',this.value)">
             <input type="number" class="active-inline-input active-inline-input-sm" min="0" max="480" step="1" value="${ptime.durationMins||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutDuration('${key}','${pp}',this.value)">
@@ -2995,8 +3088,24 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           <div class="active-workout-stat"><span>Previous Best</span><strong>${lastWeight?.weight || "—"} <em>kg</em></strong></div>
           <div class="active-workout-stat"><span>Set Progress</span><strong>${loggedSets}/${targetSets} <em>${setPct}%</em></strong></div>
         </div>
-        <button class="active-workout-log" ${!isEditable||ed.checked?'disabled':''} onclick="finishActiveExercise('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined">skip_next</span><span>Next Exercise</span><em>${ed.checked?'DONE':`SET ${nextSetNumber} OF ${targetSets}`}</em></button>
-        ${ed.checked && isEditable ? `<button class="active-secondary-btn" onclick="reopenExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Reopen</button>` : ""}
+        <div class="active-guidance-row">
+          <div class="active-guidance-card">
+            <span>Last Session</span>
+            <strong>${lastSession ? `${lastSession.weight}kg × ${lastSession.reps}` : "No data yet"}</strong>
+            <em>${lastSession ? lastSession.date : "Start building history"}</em>
+          </div>
+          <div class="active-guidance-card accent">
+            <span>Suggested Next Step</span>
+            <strong>${guidanceText}</strong>
+            <em>${getWarmupSuggestion(currentWeight) ? `Warm-up: ${getWarmupSuggestion(currentWeight)}` : "Warm-up appears after weight is set"}</em>
+          </div>
+        </div>
+        <button class="active-workout-log" ${!isEditable||ed.checked||skipped?'disabled':''} onclick="finishActiveExercise('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined">skip_next</span><span>Next Exercise</span><em>${ed.checked?'DONE':(skipped?'SKIPPED':`SET ${nextSetNumber} OF ${targetSets}`)}</em></button>
+        <div class="active-action-row">
+          ${isEditable ? `<button class="active-secondary-btn" onclick="openSwap('${key}',${activeExerciseIndex})">Substitute</button>` : ""}
+          ${isEditable && !ed.checked && !skipped ? `<button class="active-secondary-btn danger" onclick="skipExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Skip</button>` : ""}
+          ${(ed.checked || skipped) && isEditable ? `<button class="active-secondary-btn" onclick="reopenExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Reopen</button>` : ""}
+        </div>
         <div class="active-workout-history"><div class="active-workout-history-head"><h4>Exercise Log</h4><span>${setHistory.length ? `${setHistory.length} logged` : `${targetSets} target sets`}</span></div><div class="active-workout-history-list">${setHistory.length ? setHistory.map((set, index)=>`<div class="active-set-row"><div><strong>${String(index+1).padStart(2,"0")}</strong><span>${set.weight || 0}kg × ${set.reps || 0} reps</span></div><span class="material-symbols-outlined">check_circle</span></div>`).join("") : `<div class="active-set-row active-set-row-empty"><div><strong>00</strong><span>No logged set snapshots yet</span></div><span class="material-symbols-outlined">hourglass_empty</span></div>`}</div></div>
       </section>`;
     }).join("") : `<div class="activity-empty">No exercises in this workout yet.</div>`;
@@ -3006,15 +3115,25 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     panel.innerHTML=`<section class="active-workout-shell">
       <div class="active-workout-head">
         <div><p class="active-workout-kicker">${day.label} • ${day.subtitle || "Workout"}</p><h3 class="active-workout-title">${activeExercise?.name || day.title}</h3></div>
-        <div class="active-workout-rest"><span>Rest Timer</span><strong id="session-display-active">${getSessionDisplayText()}</strong><div class="active-timer-actions"><button id="timer-play-active" class="active-timer-btn" onclick="startSessionTimer()">Start</button><button id="timer-pause-active" class="active-timer-btn" style="display:none" onclick="pauseSessionTimer()">Pause</button><button class="active-timer-btn end" onclick="markDone('${key}')">End</button></div></div>
+        <div class="active-workout-rest"><span>Session Clock</span><strong id="session-display-active">${getSessionDisplayText()}</strong><div class="active-timer-actions"><button id="timer-play-active" class="active-timer-btn" onclick="startSessionTimer()">Start</button><button id="timer-pause-active" class="active-timer-btn" style="display:none" onclick="pauseSessionTimer()">Pause</button><button class="active-timer-btn end" onclick="markDone('${key}')">End</button></div></div>
       </div>
       <div class="active-workout-visual"><div class="active-workout-overlay"><div class="active-workout-stat"><span>Workout</span><strong>${day.title}</strong></div><div class="active-workout-stat"><span>Progress</span><strong>${pct}<em>%</em></strong></div></div></div>
       ${participantSelectors}
       <div class="active-panel-meta"><span>${formatDate(activeDate)}</span>${ton>0?`<span>${ton}kg moved</span>`:""}${isPastDate?`<span>HISTORY EDIT MODE</span>`:""}</div>
+      <section class="active-rest-shell">
+        <div class="active-rest-header"><span>Rest Timer</span><strong id="rest-display-active">${getRestTimerDisplayText()}</strong></div>
+        <div class="active-rest-presets">
+          <button class="active-rest-chip" onclick="startRestTimerPreset(60)">60s</button>
+          <button class="active-rest-chip" onclick="startRestTimerPreset(90)">90s</button>
+          <button class="active-rest-chip" onclick="startRestTimerPreset(120)">120s</button>
+          <button id="rest-toggle-active" class="active-rest-chip" onclick="toggleRestTimerPause()">Pause</button>
+          <button class="active-rest-chip clear" onclick="clearRestTimer()">Clear</button>
+        </div>
+      </section>
       ${swipeControls}
       ${participantCards}
       ${nextExercise ? `<button class="active-workout-next" onclick="document.getElementById('queue-item-${nextExercise.index}')?.scrollIntoView({behavior:'smooth',block:'center'})"><div><span>Next Exercise</span><strong>${nextExercise.ex.name}</strong></div><em>${getExerciseTargetSets(nextExercise.ex)} sets</em></button>` : ""}
-      <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Reorder is live during the workout':'Reorder unavailable'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${getExerciseTargetSets(item.ex)} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div></section>
+      <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Reorder is live during the workout':'Reorder unavailable'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${getExerciseTargetSets(item.ex)} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete${item.skippedCount?` • ${item.skippedCount} skipped`:""}</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div></section>
       <section class="active-session-note"><label>Session Note</label><textarea id="snote-${key}" class="active-note-input" ${!isEditable?'disabled':''} placeholder="How did this session feel?">${sessionNote}</textarea>${isEditable?`<button class="active-secondary-btn" onclick="saveSessionNote('${key}')">Save Note</button>`:""}</section>
     </section>`;
     panel.style.display="block";
@@ -3766,7 +3885,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.closeCalendarDayModal=function(){
     const modal = document.getElementById("calendar-day-modal");
     if(modal) modal.style.display = "none";
-    calendarDayModalDate = "";
   };
   window.openCalendarDayWorkout=function(ds,key){
     activeDate = ds;
@@ -3859,12 +3977,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     await saveData();
   };
   function getExerciseCompletionState(wo, participants, exerciseName){
-    const states = participants.map(pp=>Boolean(getExData(wo.exercises,pp,exerciseName).data?.checked));
+    const entries = participants.map(pp=>getExData(wo.exercises,pp,exerciseName).data||{});
+    const states = entries.map(entry=>Boolean(entry?.checked || entry?.skipped));
     return {
       allDone: states.length>0 && states.every(Boolean),
       anyDone: states.some(Boolean),
       doneCount: states.filter(Boolean).length,
-      totalCount: states.length
+      totalCount: states.length,
+      skippedCount: entries.filter(entry=>entry?.skipped).length
     };
   }
   window.finishActiveExercise=async function(key, participant, exerciseName){
@@ -3876,6 +3996,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const weight=parseFloat(target.weight||entry.weight||0) || 0;
     const reps=parseInt(target.actualReps||entry.actualReps||0,10) || 0;
     if(!Array.isArray(target.coverSets)) target.coverSets=[];
+    target.skipped = false;
+    target.skipReason = "";
     target.coverSets.push({weight,reps,ts:Date.now()});
     const planned = WORKOUT_PLAN[key]?.exercises?.find(ex=>ex.name===exerciseName);
     const targetSets = getExerciseTargetSets(planned);
@@ -3895,11 +4017,31 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderCalendar();
     await saveData();
   };
+  window.skipExerciseForParticipant=async function(key, participant, exerciseName){
+    const reason=prompt("Skip reason? Examples: busy, pain, time, other");
+    if(reason===null) return;
+    const skipReason=String(reason||"busy").trim() || "busy";
+    const wo=getWorkout(activeDate,key);
+    const {key:exKey}=getExData(wo.exercises,participant,exerciseName);
+    if(!wo.exercises[exKey]) wo.exercises[exKey]={};
+    wo.exercises[exKey].checked=false;
+    wo.exercises[exKey].skipped=true;
+    wo.exercises[exKey].skipReason=skipReason;
+    if(!Array.isArray(wo.exercises[exKey].coverSets)) wo.exercises[exKey].coverSets=[];
+    renderDayPanel(key);
+    renderStats();
+    renderCharts();
+    renderCalendar();
+    await saveData();
+    toast(`⏭ ${PROFILES[participant]?.label||participant}: skipped (${skipReason})`);
+  };
   window.reopenExerciseForParticipant=async function(key, participant, exerciseName){
     const wo=getWorkout(activeDate,key);
     const {key:exKey}=getExData(wo.exercises,participant,exerciseName);
     if(!wo.exercises[exKey]) return;
     wo.exercises[exKey].checked=false;
+    wo.exercises[exKey].skipped=false;
+    wo.exercises[exKey].skipReason="";
     const planned = WORKOUT_PLAN[key]?.exercises?.find(ex=>ex.name===exerciseName);
     const targetSets = getExerciseTargetSets(planned);
     if(Array.isArray(wo.exercises[exKey].coverSets)){

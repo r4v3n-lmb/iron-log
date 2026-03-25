@@ -1,7 +1,7 @@
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#131313;--bg2:#1c1b1b;--bg3:#201f1f;--bg4:#2a2a2a;--bg5:#353534;--border:#594137;--text:#e5e2e1;--muted:#b4b5b5;--accent:#f26411;--accent-soft:#ffb596;--accent-strong:#ffdbcd;--shadow:0 20px 60px rgba(0,0,0,.45);--hm-empty:rgba(255,255,255,0.055);--radius:16px}
 html.light-mode{--bg:#f3f0ec;--bg2:#ebe6df;--bg3:#e2ddd6;--bg4:#d8d2c8;--bg5:#cdc6ba;--border:#bcaea2;--text:#181513;--muted:#6d645e;--accent:#c95717;--accent-soft:#f2b189;--accent-strong:#fff1e6;--shadow:0 18px 45px rgba(47,33,22,.12);--hm-empty:rgba(0,0,0,0.06);--radius:16px}
-html{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif}
+html{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:15px}
 body{min-height:100vh;padding-top:12px;background:
 radial-gradient(circle at top right,rgba(242,100,17,.18),transparent 28%),
 radial-gradient(circle at top left,rgba(255,181,150,.08),transparent 22%),
@@ -10,7 +10,7 @@ line-height:1.3;overscroll-behavior:none;-webkit-overflow-scrolling:touch}
 html.light-mode body{background:
 radial-gradient(circle at top right,rgba(201,87,23,.12),transparent 30%),
 linear-gradient(180deg,#f6f2ed 0%,var(--bg) 35%,#efe8df 100%)}
-@media(max-width:680px){:root{--bg:#111;--bg2:#171717;--bg3:#1e1e1e;--bg4:#252525;--border:#303030}}
+@media(max-width:680px){:root{--bg:#111;--bg2:#171717;--bg3:#1e1e1e;--bg4:#252525;--border:#303030}html{font-size:14px}}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:var(--bg2)}::-webkit-scrollbar-thumb{background:var(--border)}
 button,input,select,textarea{font:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -692,7 +692,6 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .dashboard-card-head-tight h3{font-size:1.28rem;letter-spacing:.01em}
 .dashboard-card-head-tight span{font-family:'Barlow Condensed',sans-serif;font-size:1.45rem;font-style:italic}
 .consistency-bars{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-top:18px}
-.stitch-consistency-bars{align-items:end}
 .consistency-pill{min-height:56px;border:none;border-radius:999px;background:rgba(255,255,255,.05);color:#7d7d7d;display:grid;place-items:center;gap:2px;transition:background .18s ease,transform .18s ease,color .18s ease}
 .consistency-pill strong{font-size:.68rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
 .consistency-pill em{font-style:normal;font-size:.66rem;font-weight:800;color:inherit;opacity:.8}
@@ -776,6 +775,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .active-workout-log{min-height:68px;border:none;border-radius:22px;background:linear-gradient(135deg,var(--accent-soft),var(--accent));color:#2f1205;display:flex;align-items:center;justify-content:center;gap:10px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;box-shadow:0 18px 34px rgba(242,100,17,.24);flex-wrap:wrap;padding:12px 16px;text-align:center}
 .active-workout-log:disabled{opacity:.45;box-shadow:none}
 .active-workout-log em{display:block;width:100%;font-style:normal;font-size:.72rem;letter-spacing:.18em}
+.active-action-row{display:flex;gap:10px;flex-wrap:wrap}
 .active-workout-history{padding:18px;border-radius:22px;background:rgba(255,255,255,.04)}
 .active-workout-history-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
 .active-workout-history-head h4{font-family:'Barlow Condensed',sans-serif;font-size:1.5rem;font-style:italic;text-transform:uppercase}
@@ -795,6 +795,13 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .active-track-pill.selected{border-color:var(--track);background:color-mix(in srgb, var(--track) 18%, transparent)}
 .active-panel-meta{display:flex;gap:8px;flex-wrap:wrap}
 .active-panel-meta span,.active-secondary-inline{padding:7px 10px;border-radius:999px;background:rgba(255,255,255,.05);font-size:.64rem;font-weight:800;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;border:none}
+.active-rest-shell{padding:16px 18px;border-radius:22px;background:rgba(255,255,255,.04);display:grid;gap:12px}
+.active-rest-header{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.active-rest-header span{font-size:.64rem;font-weight:800;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+.active-rest-header strong{font-family:'Barlow Condensed',sans-serif;font-size:2rem;font-style:italic;color:var(--accent-soft)}
+.active-rest-presets{display:flex;gap:8px;flex-wrap:wrap}
+.active-rest-chip{min-height:40px;padding:0 14px;border:none;border-radius:999px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+.active-rest-chip.clear{background:rgba(244,63,94,.12);color:#ffb4c0}
 .active-participant-card{display:grid;gap:14px;padding:18px;border-radius:22px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.04)}
 .active-participant-card.complete{border-color:color-mix(in srgb, var(--participant) 32%, transparent)}
 .active-participant-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
@@ -804,10 +811,17 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .active-inline-input{height:38px;min-width:88px;padding:0 10px;border:none;border-radius:12px;background:rgba(255,255,255,.05);color:var(--text)}
 .active-inline-input-sm{min-width:64px}
 .active-workout-stats-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.active-guidance-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.active-guidance-card{padding:14px 16px;border-radius:18px;background:rgba(255,255,255,.04);display:grid;gap:6px}
+.active-guidance-card.accent{background:rgba(242,100,17,.12)}
+.active-guidance-card span{font-size:.6rem;font-weight:800;letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+.active-guidance-card strong{font-size:.92rem;font-weight:800;line-height:1.35}
+.active-guidance-card em{font-style:normal;font-size:.7rem;color:var(--muted);line-height:1.4}
 .active-swipe-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-radius:18px;background:rgba(255,255,255,.04)}
 .active-swipe-btn{width:42px;height:42px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);display:grid;place-items:center}
 .active-swipe-label{font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase}
 .active-secondary-btn{min-height:42px;padding:0 14px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.1em;text-transform:uppercase}
+.active-secondary-btn.danger{background:rgba(244,63,94,.12);color:#ffb4c0}
 .active-timer-actions{display:flex;gap:8px;margin-top:8px}
 .active-timer-btn{min-height:40px;padding:0 14px;border:none;border-radius:14px;background:rgba(255,255,255,.08);color:var(--text);font-weight:800;letter-spacing:.1em;text-transform:uppercase;display:inline-flex;align-items:center;justify-content:center;text-align:center}
 .active-timer-btn.end{background:rgba(242,100,17,.18);color:var(--accent-soft)}
@@ -1024,10 +1038,10 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
   .active-workout-controls,.active-workout-overlay{grid-template-columns:1fr}
   .active-workout-head{align-items:flex-start;flex-direction:column}
   .active-workout-rest{align-items:flex-start}
-  .active-workout-stats-row{grid-template-columns:1fr}
+  .active-workout-stats-row,.active-guidance-row{grid-template-columns:1fr}
   .active-participant-head{flex-direction:column}
   .active-participant-time{width:100%;flex-wrap:wrap}
-  .active-timer-actions,.active-queue-actions{width:100%}
+  .active-timer-actions,.active-queue-actions,.active-rest-presets,.active-action-row{width:100%}
   .profile-hero{grid-template-columns:1fr;justify-items:start}
   .profile-pro-badge{justify-self:start}
   .profile-highlight-grid,.editor-grid{grid-template-columns:1fr}
