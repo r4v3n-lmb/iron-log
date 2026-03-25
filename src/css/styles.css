@@ -443,7 +443,12 @@ html.light-mode .er:hover{background:rgba(0,0,0,.02)}
 #stp{position:fixed;top:0;right:-330px;bottom:0;width:320px;z-index:201;background:linear-gradient(180deg,rgba(28,27,27,.98),rgba(19,19,19,.98));border-left:1px solid rgba(255,181,150,.1);box-shadow:var(--shadow);transition:right .22s ease;overflow-y:auto;padding-top:28px}
 #stp.open{right:0}
 .sth{display:flex;justify-content:space-between;align-items:center;padding:22px 16px 16px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg2);z-index:1}
+.sth-left{display:flex;align-items:center;gap:10px}
 .sttl{font-family:'Barlow Condensed',sans-serif;font-weight:900;letter-spacing:.16em;font-size:.88rem;color:var(--accent)}
+.st-refresh-btn{width:34px;height:34px;border-radius:12px;border:1px solid rgba(255,181,150,.16);background:rgba(255,255,255,.04);color:var(--accent-soft);display:grid;place-items:center;cursor:pointer;transition:background .12s ease,border-color .12s ease,color .12s ease,transform .12s ease}
+.st-refresh-btn:hover{background:rgba(255,255,255,.08);border-color:rgba(255,181,150,.28);color:var(--accent)}
+.st-refresh-btn:active{transform:scale(.96)}
+.st-refresh-btn .material-symbols-outlined{font-size:1.1rem}
 .stcb{border:none;background:transparent;color:var(--muted);font-size:1.3rem;cursor:pointer}
 .stcb:hover{color:var(--text)}
 .sts{padding:22px 16px;border-bottom:1px solid rgba(255,181,150,.08)}

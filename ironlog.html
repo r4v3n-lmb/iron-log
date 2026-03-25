@@ -327,7 +327,12 @@
 <div id="sto"></div>
 <div id="stp">
   <div class="sth">
-    <span class="sttl">⚙ SETTINGS</span>
+    <div class="sth-left">
+      <span class="sttl">⚙ SETTINGS</span>
+      <button class="st-refresh-btn" type="button" onclick="refreshAppAndClearCache()" aria-label="Refresh app and clear cache">
+        <span class="material-symbols-outlined">refresh</span>
+      </button>
+    </div>
     <button class="stcb" onclick="closeSettings()">×</button>
   </div>
   <div class="sts" data-sec="user">
@@ -367,24 +372,6 @@
     <div class="stst stst-toggle" onclick="toggleSettingsSection('admin')"><span>// ADMIN</span><span class="st-arrow" id="st-arrow-admin">▾</span></div>
     <div class="st-body">
       <button class="st-ab" onclick="openAdminDataPage()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">📊 OPEN ADMIN DATA TABLES</button>
-    </div>
-  </div>
-  <div class="sts" data-sec="debug">
-    <div class="stst stst-toggle" onclick="toggleSettingsSection('debug')"><span>// DEBUG</span><span class="st-arrow" id="st-arrow-debug">▾</span></div>
-    <div class="st-body">
-      <button class="st-ab" onclick="debugFirebase()" style="color:#f0c040;border-color:rgba(240,192,64,.3)">🔍 CHECK FIREBASE DOCS</button>
-      <button class="st-ab" onclick="forceMigrate()" style="color:#5cba5c;border-color:rgba(92,186,92,.3)">⚡ FORCE RE-MIGRATE DATA</button>
-      <div style="font-size:.7rem;color:var(--muted);margin-top:4px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.08em">Open browser console (F12) to see results</div>
-    </div>
-  </div>
-  <div class="sts" data-sec="templates">
-    <div class="stst stst-toggle" onclick="toggleSettingsSection('templates')"><span>// WORKOUT TEMPLATES</span><span class="st-arrow" id="st-arrow-templates">▾</span></div>
-    <div class="st-body">
-      <div style="display:flex;gap:5px;margin-bottom:8px">
-        <input type="text" id="template-input" placeholder="Template name..." style="flex:1;background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 9px;font-family:'Barlow Condensed',sans-serif;outline:none" onkeydown="if(event.key==='Enter')saveTemplate(this.value)">
-        <button class="st-ab" style="width:auto;margin:0;background:rgba(92,186,92,.1);border-color:rgba(92,186,92,.3);color:#5cba5c" onclick="saveTemplate(document.getElementById('template-input').value)">SAVE</button>
-      </div>
-      <div id="template-list" style="font-size:.75rem"></div>
     </div>
   </div>
   <div class="sts" data-sec="theme">

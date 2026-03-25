@@ -960,7 +960,54 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     });
     await setDoc(ref, payload, { merge: true });
   }
-  async function persistDeletionState(){
+  function getDeletionProfileKeys(){
+    const keys = new Set([activeProfile]);
+    Object.keys(state.allUserWorkouts || {}).forEach(pk=>keys.add(pk));
+    Object.keys(PROFILES || {}).forEach(pk=>keys.add(pk));
+    return [...keys].filter(Boolean);
+  }
+  function deleteWorkoutEntryFromBucket(bucket, ds, key){
+    if(!bucket?.[ds]?.[key]) return false;
+    delete bucket[ds][key];
+    if(Object.keys(bucket[ds]).length===0) delete bucket[ds];
+    return true;
+  }
+  function deleteSessionPrsFromBucket(prBucket, ds, key){
+    if(!prBucket) return;
+    Object.keys(prBucket).forEach(prKey=>{
+      const pr = prBucket?.[prKey];
+      if(pr?.date === ds && pr?.dayKey === key) delete prBucket[prKey];
+    });
+  }
+  function deleteDayPrsFromBucket(prBucket, key){
+    if(!prBucket) return;
+    Object.keys(prBucket).forEach(prKey=>{
+      if(prBucket?.[prKey]?.dayKey === key) delete prBucket[prKey];
+    });
+  }
+  function mirrorWorkoutDeletionAcrossProfiles(ds, key){
+    getDeletionProfileKeys().forEach(pk=>{
+      if(!state.allUserWorkouts?.[pk]) return;
+      state.allUserWorkouts[pk].workouts = state.allUserWorkouts[pk].workouts || {};
+      state.allUserWorkouts[pk].prs = state.allUserWorkouts[pk].prs || {};
+      deleteWorkoutEntryFromBucket(state.allUserWorkouts[pk].workouts, ds, key);
+      deleteSessionPrsFromBucket(state.allUserWorkouts[pk].prs, ds, key);
+    });
+  }
+  function mirrorWorkoutDayDeletionAcrossProfiles(key){
+    getDeletionProfileKeys().forEach(pk=>{
+      if(!state.allUserWorkouts?.[pk]) return;
+      state.allUserWorkouts[pk].workouts = state.allUserWorkouts[pk].workouts || {};
+      state.allUserWorkouts[pk].prs = state.allUserWorkouts[pk].prs || {};
+      state.allUserWorkouts[pk].plan = state.allUserWorkouts[pk].plan || {};
+      Object.keys(state.allUserWorkouts[pk].workouts || {}).forEach(ds=>{
+        deleteWorkoutEntryFromBucket(state.allUserWorkouts[pk].workouts, ds, key);
+      });
+      delete state.allUserWorkouts[pk].plan[key];
+      deleteDayPrsFromBucket(state.allUserWorkouts[pk].prs, key);
+    });
+  }
+  async function persistDeletionState(syncAllProfiles=false){
     try{
       normalizeWorkoutPlanOrder();
       saveLocalSnapshot(activeProfile);
@@ -976,6 +1023,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         payload.prs = state.prs || {};
         payload.savedWorkouts = state.savedWorkouts || {};
         payload.gymUrl = state.gymUrl || "";
+      }
+      if(syncAllProfiles){
+        getDeletionProfileKeys().forEach(pk=>{
+          const profileState = state.allUserWorkouts?.[pk] || {};
+          payload[`profileData.${pk}.workouts`] = pk===activeProfile ? (state.workouts || {}) : (profileState.workouts || {});
+          payload[`profileData.${pk}.prs`] = pk===activeProfile ? (state.prs || {}) : (profileState.prs || {});
+          payload[`profileData.${pk}.plan`] = pk===activeProfile ? (WORKOUT_PLAN || {}) : (profileState.plan || {});
+        });
       }
       await updateDoc(ref, payload);
       clearPendingSync(activeProfile);
@@ -2091,16 +2146,36 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(wo.done) return true;
     return Object.values(wo.exercises || {}).some(entry=>hasExerciseActivityEntry(entry));
   }
+  function getSessionParticipantKeys(wo, dayKey){
+    const day = getWorkoutDayDescriptor(dayKey, wo);
+    const explicit = [...new Set([...(wo?.sessionParticipants || []), ...(day?.participants || [])].filter(Boolean))];
+    if(explicit.length) return explicit;
+    const inferred = new Set();
+    Object.keys(wo?.exercises || {}).forEach(exKey=>{
+      const clean = String(exKey || "");
+      if(clean.includes("_")){
+        const owner = clean.split("_")[0];
+        if(owner) inferred.add(owner);
+      }
+    });
+    return [...inferred];
+  }
   function sessionHasActivityForParticipant(wo, dayKey, participant=activeProfile){
     if(!wo) return false;
-    const day = getWorkoutDayDescriptor(dayKey, wo);
-    const scopedParticipants = wo.sessionParticipants || day?.participants || [];
-    if(wo.done && scopedParticipants.includes(participant)) return true;
+    const scopedParticipants = getSessionParticipantKeys(wo, dayKey);
+    if(wo.done){
+      if(!scopedParticipants.length) return true;
+      if(scopedParticipants.includes(participant)) return true;
+    }
     return Object.keys(wo.exercises || {}).some(exKey=>{
       const clean = String(exKey || "");
-      const owner = clean.includes("_") ? clean.split("_")[0] : participant;
-      if(owner !== participant) return false;
       const entry = wo.exercises?.[exKey];
+      if(clean.includes("_")){
+        const owner = clean.split("_")[0];
+        if(owner !== participant) return false;
+      } else if(scopedParticipants.length && !scopedParticipants.includes(participant)){
+        return false;
+      }
       return hasExerciseActivityEntry(entry);
     });
   }
@@ -2341,7 +2416,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   }
 
   function renderCharts(){
-    if(!dashboardOpen)return;
     const ac=PROFILES[activeProfile].color;
     const {w,totals,datasets}=getWeeklyFreq();
     const gopt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true,barInside:true}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:13}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"},stepSize:1},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}};
@@ -4027,15 +4101,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const pr = state.prs?.[prKey];
       return pr?.date === ds && pr?.dayKey === key;
     });
-    delete state.workouts[ds][key];
-    if(Object.keys(state.workouts[ds]).length===0) delete state.workouts[ds];
+    deleteWorkoutEntryFromBucket(state.workouts, ds, key);
     removedPrKeys.forEach(prKey=>{ delete state.prs[prKey]; });
+    mirrorWorkoutDeletionAcrossProfiles(ds, key);
     if(activeDay===key && activeDate===ds){
       activeDay = null;
       const panel = document.getElementById("day-panel");
       if(panel) panel.style.display = "none";
     }
-    await persistDeletionState();
+    await persistDeletionState(true);
     renderDayGrid();
     renderAll();
     selectDate(ds);
@@ -4611,17 +4685,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.deleteDay=async function(key){
     const day=WORKOUT_PLAN[key]; if(!day)return;
     if(!confirm(`Delete "${day.title}" from your plan and remove your logged entries for this day?`))return;
-    const removedDates = [];
     Object.keys(state.workouts||{}).forEach(ds=>{
       if(!state.workouts?.[ds]?.[key]) return;
-      removedDates.push(ds);
-      delete state.workouts[ds][key];
-      if(Object.keys(state.workouts[ds]).length===0) delete state.workouts[ds];
+      deleteWorkoutEntryFromBucket(state.workouts, ds, key);
     });
     const removedPrKeys = Object.keys(state.prs||{}).filter(prKey=>state.prs?.[prKey]?.dayKey===key);
     removedPrKeys.forEach(prKey=>{ delete state.prs[prKey]; });
     delete WORKOUT_PLAN[key]; normalizeWorkoutPlanOrder(); if(activeDay===key){activeDay=null;document.getElementById("day-panel").style.display="none";}
-    closeCardMenu(); renderDayGrid(); renderAll(); await persistDeletionState(); toast(`🗑 ${day.title} deleted`);
+    mirrorWorkoutDayDeletionAcrossProfiles(key);
+    closeCardMenu(); renderDayGrid(); renderAll(); await persistDeletionState(true); toast(`🗑 ${day.title} deleted`);
   };
 
   // ─── ADD DAY ───
@@ -5009,13 +5081,41 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const np=document.getElementById("notif-panel");
     if(np) np.style.display="none";
     settingsSectionState = {
-      user:false,data:false,install:false,management:false,admin:false,debug:false,templates:false,theme:false,version:false
+      user:false,data:false,install:false,management:false,admin:false,theme:false,version:false
     };
     document.getElementById("stp").classList.add("open");
     document.getElementById("sto").style.display="block";
-    renderSettingsProfiles(); renderTemplateList(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderInstallSettingsBlock(); renderSettingsSectionUI();
+    renderSettingsProfiles(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderInstallSettingsBlock(); renderSettingsSectionUI();
   };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
+  window.refreshAppAndClearCache=async function(){
+    const confirmed = confirm("Refresh Iron Log and clear this device cache first?");
+    if(!confirmed) return;
+    try{
+      closeSettings();
+      const localKeys = [];
+      for(let i=0;i<localStorage.length;i++){
+        const key = localStorage.key(i);
+        if(key && (/^ironlog_pwa_snapshot_/i.test(key) || /^ironlog_pwa_pending_sync_/i.test(key))) localKeys.push(key);
+      }
+      localKeys.forEach(key=>localStorage.removeItem(key));
+      try{ sessionStorage.clear(); }catch(_e){}
+      if("caches" in window){
+        const cacheKeys = await caches.keys();
+        await Promise.all(cacheKeys.map(key=>caches.delete(key)));
+      }
+      if("serviceWorker" in navigator){
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(reg=>reg.unregister()));
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.set("refresh", Date.now().toString());
+      window.location.replace(url.toString());
+    }catch(e){
+      console.error("[IronLog] Refresh/cache clear failed", e);
+      toast("⚠️ Refresh failed");
+    }
+  };
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
     const profileKeys=isAdminUser() ? Object.keys(PROFILES) : [activeProfile];
@@ -5030,8 +5130,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const tabsEl=document.getElementById("mg-tabs");
     const bodyEl=document.getElementById("mg-body");
     if(!tabsEl||!bodyEl) return;
-    const tabs=[["workouts","WORKOUTS"],["exercises","EXERCISES"],["users","USERS"]];
+    const tabs=[["workouts","WORKOUTS"],["exercises","EXERCISES"]];
     tabsEl.innerHTML=tabs.map(([id,label])=>`<button class="th-btn ${managementTab===id?'active':''}" onclick="setManagementTab('${id}')">${label}</button>`).join('');
+    if(!tabs.some(([id])=>id===managementTab)) managementTab = "workouts";
     if(managementTab==="workouts"){
       const items=sortedDayKeys();
       bodyEl.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px">
