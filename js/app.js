@@ -12,7 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.36";
+  const APP_VERSION = "v1.1.37";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -549,6 +549,59 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const parsed = Number(weekday);
     if(Number.isNaN(parsed) || weekday == null || weekday === "") return "—";
     return ["SUN","MON","TUE","WED","THU","FRI","SAT"][parsed] || "—";
+  }
+  function formatWorkoutKeyTitle(key){
+    return String(key || "workout").replace(/[_-]+/g," ").replace(/\s+/g," ").trim().toUpperCase();
+  }
+  function hasExerciseActivityEntry(entry){
+    if(!entry) return false;
+    if(entry.checked || entry.skipped) return true;
+    if(parseFloat(entry.weight || 0) > 0) return true;
+    if(parseFloat(entry.actualReps || 0) > 0) return true;
+    if(Array.isArray(entry.coverSets) && entry.coverSets.some(set=>{
+      if(!set) return false;
+      return parseFloat(set.weight || 0) > 0 || parseFloat(set.reps || 0) > 0;
+    })) return true;
+    return false;
+  }
+  function getWorkoutDayDescriptor(dayKey, wo){
+    const plannedDay = WORKOUT_PLAN?.[dayKey];
+    if(plannedDay) return plannedDay;
+    return {
+      label: formatWorkoutKeyTitle(dayKey),
+      title: wo?.title || wo?.dayTitle || formatWorkoutKeyTitle(dayKey),
+      subtitle: wo?.subtitle || "",
+      color: wo?.color || PROFILES[activeProfile]?.color || "#e85d04",
+      participants: wo?.sessionParticipants || [activeProfile],
+      exercises: []
+    };
+  }
+  function getSessionExerciseEntries(ds, dayKey, participant=activeProfile){
+    const wo = state.workouts?.[ds]?.[dayKey];
+    if(!wo) return [];
+    const day = WORKOUT_PLAN?.[dayKey];
+    const rows = [];
+    const seen = new Set();
+    (day?.exercises || []).forEach(ex=>{
+      const { data } = getExData(wo.exercises || {}, participant, ex.name);
+      if(!hasExerciseActivityEntry(data)) return;
+      const cleanName = String(data?.customName || ex.name || "").trim();
+      const normalized = normalizeExerciseName(cleanName);
+      if(seen.has(normalized)) return;
+      seen.add(normalized);
+      rows.push({ name: cleanName, exercise: ex, data });
+    });
+    Object.keys(wo.exercises || {}).forEach(exKey=>{
+      const raw = wo.exercises?.[exKey];
+      const owner = raw?.participant || (String(exKey).includes("_") ? String(exKey).split("_")[0] : participant);
+      if(owner !== participant || !hasExerciseActivityEntry(raw)) return;
+      const cleanName = String(raw.customName || stripParticipantPrefix(stripParticipantPrefix(String(exKey || ""))) || "").trim();
+      const normalized = normalizeExerciseName(cleanName);
+      if(!cleanName || seen.has(normalized)) return;
+      seen.add(normalized);
+      rows.push({ name: cleanName, exercise: null, data: raw });
+    });
+    return rows;
   }
   function sortedDayKeys(){
     return Object.keys(WORKOUT_PLAN).sort((a,b)=>{
@@ -1599,8 +1652,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         Object.keys(wo.exercises||{}).forEach(exKey=>{
           const raw=wo.exercises[exKey]||{};
           const participant = raw.participant || (String(exKey).includes("_") ? String(exKey).split("_")[0] : activeProfile);
-          if(participant !== activeProfile || !raw.checked) return;
-          const weight=parseFloat(raw.weight||0);
+          if(participant !== activeProfile || !hasExerciseActivityEntry(raw)) return;
+          const coverSetWeight = Array.isArray(raw.coverSets) ? Math.max(0, ...raw.coverSets.map(set=>parseFloat(set?.weight || 0) || 0)) : 0;
+          const weight=Math.max(parseFloat(raw.weight||0), coverSetWeight);
           if(weight<=0) return;
           const exerciseName=stripParticipantPrefix(stripParticipantPrefix(String(exKey||""))).trim();
           if(!exerciseName) return;
@@ -1948,18 +2002,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function sessionHasLoggedActivity(wo){
     if(!wo) return false;
     if(wo.done) return true;
-    return Object.values(wo.exercises || {}).some(entry=>{
-      if(!entry) return false;
-      if(entry.checked) return true;
-      if(parseFloat(entry.weight || 0) > 0) return true;
-      if(parseFloat(entry.actualReps || 0) > 0) return true;
-      if(Array.isArray(entry.coverSets) && entry.coverSets.length) return true;
-      return false;
-    });
+    return Object.values(wo.exercises || {}).some(entry=>hasExerciseActivityEntry(entry));
   }
   function sessionHasActivityForParticipant(wo, dayKey, participant=activeProfile){
     if(!wo) return false;
-    const day = WORKOUT_PLAN?.[dayKey];
+    const day = getWorkoutDayDescriptor(dayKey, wo);
     const scopedParticipants = wo.sessionParticipants || day?.participants || [];
     if(wo.done && scopedParticipants.includes(participant)) return true;
     return Object.keys(wo.exercises || {}).some(exKey=>{
@@ -1967,37 +2014,39 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const owner = clean.includes("_") ? clean.split("_")[0] : participant;
       if(owner !== participant) return false;
       const entry = wo.exercises?.[exKey];
-      if(!entry) return false;
-      if(entry.checked) return true;
-      if(parseFloat(entry.weight || 0) > 0) return true;
-      if(parseFloat(entry.actualReps || 0) > 0) return true;
-      if(Array.isArray(entry.coverSets) && entry.coverSets.length) return true;
-      return false;
+      return hasExerciseActivityEntry(entry);
     });
   }
 
-  function getRecentDashboardSessions(limit=3){
+  function getHistoryFeedEntries(limit=0){
     const items = [];
     getVisibleWorkedDates().forEach(ds=>{
       getCalendarDayEntries(ds).forEach(entry=>{
-        items.push({
-          date: ds,
-          key: entry.key,
-          wo: entry.wo,
-          day: entry.day,
-          tonnage: entry.tonnage,
-          checkedCount: entry.exercises,
-          duration: entry.durationMins,
-          exerciseLines: entry.exerciseLines
-        });
+        items.push({ ...entry, date: ds });
       });
     });
-    return items.slice(0, limit);
+    items.sort((a,b)=>{
+      if(a.date === b.date) return String(b.wo?.updatedAt || "").localeCompare(String(a.wo?.updatedAt || ""));
+      return b.date.localeCompare(a.date);
+    });
+    return limit > 0 ? items.slice(0, limit) : items;
+  }
+  function getRecentDashboardSessions(limit=3){
+    return getHistoryFeedEntries(limit).map(entry=>({
+      date: entry.date,
+      key: entry.key,
+      wo: entry.wo,
+      day: entry.day,
+      tonnage: entry.tonnage,
+      checkedCount: entry.exercises,
+      duration: entry.durationMins,
+      exerciseLines: entry.exerciseLines
+    }));
   }
   function getVisibleActivityFallback(limit=3){
     return getVisibleWorkedDates(limit).map(ds=>{
       const ownDay = state.workouts?.[ds] ? Object.keys(state.workouts[ds])[0] : "";
-      const title = ownDay && WORKOUT_PLAN[ownDay]?.title ? WORKOUT_PLAN[ownDay].title : "Workout Logged";
+      const title = ownDay ? getWorkoutDayDescriptor(ownDay, state.workouts?.[ds]?.[ownDay])?.title : "Workout Logged";
       return { date: ds, title };
     });
   }
@@ -2043,7 +2092,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       if(worked) return;
       if(sessionHasActivityForParticipant(wd[key], key, activeProfile)){
         worked = true;
-        workoutColor = WORKOUT_PLAN[key]?.color || PROFILES[activeProfile]?.color || null;
+        workoutColor = getWorkoutDayDescriptor(key, wd[key])?.color || PROFILES[activeProfile]?.color || null;
       }
     });
     return { worked, otherUserColor: workoutColor, sourceUser: activeProfile };
@@ -2218,7 +2267,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(!dashboardOpen)return;
     const ac=PROFILES[activeProfile].color;
     const {w,c,colors}=getWeeklyFreq();
-    const gopt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:13}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"},stepSize:1},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}};
+    const gopt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true,barInside:true}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:13}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"},stepSize:1},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}};
     if(freqChart){freqChart.data.datasets[0].data=c;freqChart.data.datasets[0].backgroundColor=colors;freqChart.data.datasets[0].borderColor=colors;freqChart.update();}
     else freqChart=new Chart(document.getElementById("freqChart"),{type:"bar",data:{labels:w,datasets:[{label:"Workouts",data:c,backgroundColor:colors,borderColor:colors,borderWidth:2,borderRadius:6}]},options:gopt});
     const bd=getDayTypeBreakdown();
@@ -2760,13 +2809,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     Object.keys(wo).forEach(dayKey => {
       const session = wo[dayKey];
       if (!sessionHasActivityForParticipant(session, dayKey, activeProfile)) return;
-      const day = WORKOUT_PLAN[dayKey];
-      if (!day) return;
-      day.exercises.forEach(ex => {
-        const muscle = getMuscleGroup(ex.name);
-        const { data } = getExData(session.exercises||{}, activeProfile, ex.name);
-        const hasActivity = data?.checked || parseFloat(data?.weight||0)>0 || parseFloat(data?.actualReps||0)>0 || (Array.isArray(data?.coverSets) && data.coverSets.length) || ((session.sessionParticipants||day.participants||[]).includes(activeProfile) && session.done);
-        if(hasActivity) muscleVol[muscle] = (muscleVol[muscle] || 0) + (ex.sets || 0);
+      getSessionExerciseEntries(dateStr, dayKey, activeProfile).forEach(({ name, exercise, data }) => {
+        const muscle = getMuscleGroup(name);
+        const setCount = Array.isArray(data?.coverSets) && data.coverSets.length
+          ? data.coverSets.length
+          : Math.max(parseInt(exercise?.sets || 0, 10) || 0, data?.checked || data?.skipped ? 1 : 0, 1);
+        muscleVol[muscle] = (muscleVol[muscle] || 0) + setCount;
       });
     });
     return muscleVol;
@@ -2909,6 +2957,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const filteredPrs = prWallFilter === 'all' ? prs : prs.filter(pr => pr.muscleGroup === prWallFilter);
     const muscleGroups = ['all', 'chest', 'back', 'shoulders', 'arms', 'legs', 'core', 'other'];
     const ac = PROFILES[activeProfile].color;
+    const summaryCards = muscleGroups.slice(1).map(group=>{
+      const count = prs.filter(pr => pr.muscleGroup === group).length;
+      return `<div class="prw-summary-card"><span>${group.toUpperCase()}</span><strong>${count}</strong></div>`;
+    }).join("");
 
     let h = `<div class="prw-header">
       <div class="prw-title">🏆 PERSONAL RECORDS</div>
@@ -2921,9 +2973,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       }
     });
     h += `</div></div>`;
+    h += `<div class="prw-summary-grid">
+      <div class="prw-summary-card total"><span>TOTAL RECORDS</span><strong>${prs.length}</strong></div>
+      ${summaryCards}
+    </div>`;
 
     if(filteredPrs.length === 0){
-      h += `<div class="prw-empty">No personal records yet. Keep lifting! 💪</div>`;
+      h += `<div class="prw-empty">No detailed personal-record cards yet. The totals above are still tracking your strongest logged lifts.</div>`;
     } else {
       h += `<div class="prw-grid">`;
       filteredPrs.forEach(pr => {
@@ -3751,20 +3807,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   }
   function getHistoryExerciseLines(ds, key){
     const wo = state.workouts?.[ds]?.[key];
-    const day = WORKOUT_PLAN[key];
-    if(!wo || !day) return [];
-    return (day.exercises || []).map(ex=>{
-      const { data } = getExData(wo.exercises || {}, activeProfile, ex.name);
-      if(!data) return null;
-      const hasActivity = data.checked || parseFloat(data.weight || 0) > 0 || parseFloat(data.actualReps || 0) > 0 || (Array.isArray(data.coverSets) && data.coverSets.length);
-      if(!hasActivity) return null;
-      const setsLogged = Array.isArray(data.coverSets) && data.coverSets.length ? data.coverSets.length : (data.checked ? getExerciseTargetSets(ex) : 0);
-      const weight = parseFloat(data.weight || 0);
-      const reps = parseInt(data.actualReps || ex.reps || 0, 10) || 0;
-      let meta = `${Math.max(setsLogged, ex.sets || 0)} sets`;
+    if(!wo) return [];
+    return getSessionExerciseEntries(ds, key, activeProfile).map(({ name, exercise, data })=>{
+      const setsLogged = Array.isArray(data?.coverSets) && data.coverSets.length
+        ? data.coverSets.length
+        : Math.max(parseInt(exercise?.sets || 0, 10) || 0, data?.checked || data?.skipped ? 1 : 0, 1);
+      const coverSetWeight = Array.isArray(data?.coverSets) ? Math.max(0, ...data.coverSets.map(set=>parseFloat(set?.weight || 0) || 0)) : 0;
+      const coverSetReps = Array.isArray(data?.coverSets) ? Math.max(0, ...data.coverSets.map(set=>parseInt(set?.reps || 0, 10) || 0)) : 0;
+      const weight = Math.max(parseFloat(data?.weight || 0), coverSetWeight);
+      const reps = Math.max(parseInt(data?.actualReps || exercise?.reps || 0, 10) || 0, coverSetReps);
+      let meta = `${setsLogged} sets`;
       if(weight > 0) meta += ` × ${weight} kg`;
       else if(reps > 0) meta += ` × ${reps} reps`;
-      return { name: data.customName || ex.name, meta };
+      return { name, meta };
     }).filter(Boolean);
   }
   function getDayPrCount(ds, key){
@@ -3777,8 +3832,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function getCalendarDayEntries(ds){
     return Object.keys(state.workouts?.[ds] || {}).map(key=>{
       const wo = state.workouts?.[ds]?.[key];
-      const day = WORKOUT_PLAN[key];
-      if(!wo || !day) return null;
+      const day = getWorkoutDayDescriptor(key, wo);
+      if(!wo) return null;
       if(!sessionHasActivityForParticipant(wo, key, activeProfile)) return null;
       const exerciseLines = getHistoryExerciseLines(ds, key);
       return {
@@ -4462,10 +4517,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(ex&&ex.dataset.key===key){ex.remove();return;}
     if(ex)ex.remove();
     const m=document.createElement("div"); m.id="card-menu-popup"; m.dataset.key=key; m.className="cmp";
-    m.innerHTML=`<button onclick="openEdit('${key}')">✎ EDIT WORKOUT</button><button onclick="openSave('${key}')">💾 SAVE / REPLACE</button><button onclick="deleteDay('${key}')" style="color:#ff8080">✕ DELETE</button>`;
-    const r=e.currentTarget.getBoundingClientRect();
-    m.style.top=(r.bottom+window.scrollY+4)+"px"; m.style.right=(window.innerWidth-r.right)+"px";
-    document.body.appendChild(m);
+    m.onclick=ev=>ev.stopPropagation();
+    m.innerHTML=`<button onclick="event.stopPropagation();openEdit('${key}')">✎ EDIT WORKOUT</button><button onclick="event.stopPropagation();openSave('${key}')">💾 SAVE / REPLACE</button><button onclick="event.stopPropagation();deleteDay('${key}')" style="color:#ff8080">✕ DELETE</button>`;
+    const shell=e.currentTarget.closest(".day-card-shell") || e.currentTarget.parentElement;
+    if(shell) shell.appendChild(m);
     setTimeout(()=>document.addEventListener("click",closeCardMenu,{once:true}),10);
   };
   function closeCardMenu(){ const m=document.getElementById("card-menu-popup"); if(m)m.remove(); }
@@ -5551,8 +5606,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           if(!value) return;
           if(chart.config.type === "bar"){
             const props = element.getProps(["x","y","base"], true);
-            const y = props.y < props.base ? props.y - 10 : props.y + 10;
-            drawText(value, props.x, y);
+            const barHeight = Math.abs(props.base - props.y);
+            const inside = !!opts?.barInside && barHeight > 24;
+            const y = inside ? props.y + 12 : (props.y < props.base ? props.y - 10 : props.y + 10);
+            drawText(value, props.x, y, inside ? "#111" : "#f3f1ef");
             return;
           }
           if(chart.config.type === "doughnut"){
