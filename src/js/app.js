@@ -12,21 +12,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.31";
+  const APP_VERSION = "v1.1.32";
 
-  // ─── DEFAULT PLAN (used only if Firebase has no plan saved) ───
-  const DEFAULT_PLAN = {
-    "day1":{ label:"DAY 1", weekday:1, title:"PUSH", subtitle:"Chest · Shoulders · Triceps", color:"#e85d04", participants:["revan","bronwen"],
-      exercises:[{name:"Smith Machine Bench",sets:4,reps:"12"},{name:"Incline Dumbbell Press",sets:3,reps:"12"},{name:"Cable Chest Fly",sets:3,reps:"12"},{name:"Overhead Press",sets:4,reps:"10"},{name:"Dumbbell Shoulder Press",sets:3,reps:"12"},{name:"Lateral Raise Machine",sets:3,reps:"12"},{name:"Tricep Pushdown",sets:3,reps:"12"},{name:"Overhead Tricep Extension",sets:3,reps:"12"}]},
-    "day2":{ label:"DAY 2", weekday:2, title:"PULL", subtitle:"Back · Biceps", color:"#4361ee", participants:["revan","bronwen"],
-      exercises:[{name:"Lat Pulldown",sets:4,reps:"12"},{name:"Seated Cable Row",sets:4,reps:"12"},{name:"Row Machine",sets:3,reps:"12"},{name:"Face Pulls (Cable)",sets:3,reps:"12"},{name:"Straight Arm Pulldown",sets:3,reps:"12"},{name:"EZ Bar / Dumbbell Curl",sets:3,reps:"12"},{name:"Hammer Curl",sets:3,reps:"12"},{name:"Curl Machine",sets:4,reps:"12"}]},
-    "day3":{ label:"DAY 3", weekday:3, title:"LEGS", subtitle:"Quads · Hamstrings · Glutes · Calves", color:"#7b2d8b", participants:["revan","bronwen"],
-      exercises:[{name:"Barbell Back Squat",sets:4,reps:"10"},{name:"Barbell Hip Thrust",sets:4,reps:"12"},{name:"Romanian Deadlift",sets:3,reps:"10"},{name:"Leg Press",sets:3,reps:"12"},{name:"Leg Curl Machine",sets:3,reps:"12"},{name:"Leg Extension Machine",sets:3,reps:"12"},{name:"Walking Lunges (DBs)",sets:3,reps:"12"},{name:"Calf Raise",sets:4,reps:"15"},{name:"Abductor Machine",sets:3,reps:"15"}]},
-    "day4":{ label:"DAY 4", weekday:4, title:"UPPER", subtitle:"Arms · Shoulders", color:"#2ec4b6", participants:["revan"],
-      exercises:[{name:"Cable Lateral Raise",sets:3,reps:"12"},{name:"Cable Upright Row",sets:3,reps:"12"},{name:"Rear Delt Fly Machine",sets:3,reps:"15"},{name:"EZ Bar Curl",sets:3,reps:"12"},{name:"Incline Dumbbell Curl",sets:3,reps:"12"},{name:"Tricep Rope Pushdown",sets:3,reps:"12"},{name:"Tricep Dip Machine",sets:3,reps:"12"},{name:"Overhead Tricep Extension",sets:3,reps:"12"},{name:"Reverse Curl",sets:2,reps:"15"}]},
-    "day5":{ label:"DAY 5", weekday:5, title:"CARDIO", subtitle:"Cardio · Abs", color:"#f72585", participants:["revan"],
-      exercises:[{name:"Assault Bike / StairMaster",sets:0,reps:"20-30 min"},{name:"Cable Crunch",sets:3,reps:"15-20"},{name:"Hanging Leg Raise",sets:3,reps:"12-15"}]}
-  };
+  // Plans are now sourced from Firebase only.
+  const DEFAULT_PLAN = {};
 
   function deepCopy(o){ return JSON.parse(JSON.stringify(o)); }
   const STITCH_ASSETS = {
@@ -36,10 +25,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     progressPhotoA: "https://lh3.googleusercontent.com/aida-public/AB6AXuCtV24lPkEWZeMLY_2CM6TaIorx-Sn_Bp3v5wRxCA8ez9wPwVKpxygFBkbqAptBWV7ca27bwX8GI5zp71RenSkZvxQLnST-7rDuA6faQlRXAYpC5yKzLUdO07bjEXgMVMCKsys8COC4Dvdz-P2B3ECm1h8_HhYYlMfhLm0GBd-obX-W3FAGlu7-0DZ5J9LwUSV14lV8A164GRGDK6-5jVD1DjQlfGzeN4v57iXlptOEDTKXkzC-CLErMB7wUNLY8RsOQV54nC6q7-Y",
     progressPhotoB: "https://lh3.googleusercontent.com/aida-public/AB6AXuCsekc3hTBjmPV_g6wRjujB_hv-Zz21ckLQF7hrAgWDCJKmWkATz1cwSJxMZrZ502rzLe2T3jTd7H2b49cODRsAgp-arDx8LBRkD8QwXrFArlrozwmrrCFWBq4nGAuHZ3NN8qoAc1LyR5aoHpzrIrqxyA56ZZGgGOjhUC3Jp3PubH4zMw0PBS0hpRHZ0JHnGFL20z8guT7qqebxezwXIEWod7LRF29O2eXjA-x4wCFr5DJgCvc3T3csfJbr4TIZ2O5lje9FR74BARs"
   };
-  const PREMADE = new Set(["revan","bronwen"]);
+  const PREMADE = new Set();
   // seedPlan is ONLY used as a fallback if Firebase returns nothing
-  function seedPlan(pk){ return PREMADE.has(pk)?deepCopy(DEFAULT_PLAN):{}; }
-  function canUseLegacySharedFallback(pk){ return PREMADE.has(pk); }
+  function seedPlan(_pk){ return deepCopy(DEFAULT_PLAN); }
+  function canUseLegacySharedFallback(){ return false; }
 
   const MAX_DAYS = 10;
   let WORKOUT_PLAN = {};
@@ -80,6 +69,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   let adminTablesCache = null;
   let notificationsOpen = false;
   let notificationsSeen = {};
+  let calendarDayModalDate = "";
   let settingsSectionState = {
     user: false,
     data: false,
@@ -134,6 +124,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function applyLocalSnapshot(snapshot){
     if(!snapshot || typeof snapshot !== "object") return false;
     WORKOUT_PLAN = snapshot.plan ? deepCopy(snapshot.plan) : seedPlan(activeProfile);
+    normalizeWorkoutPlanOrder();
     state.workouts = snapshot.workouts || {};
     state.prs = snapshot.prs || {};
     state.savedWorkouts = snapshot.savedWorkouts || {};
@@ -537,7 +528,29 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     return Object.keys(WORKOUT_PLAN).find(k=>WORKOUT_PLAN[k].weekday===dow)||null;
   }
   function getProfileDocId(){ return PROFILES[activeProfile].docId; }
-  function sortedDayKeys(){ return Object.keys(WORKOUT_PLAN).sort((a,b)=>(parseInt(a.replace("day",""))||0)-(parseInt(b.replace("day",""))||0)); }
+  function getWorkoutOrderValue(key){
+    const day = WORKOUT_PLAN?.[key] || {};
+    const explicit = parseInt(day.order, 10);
+    if(Number.isInteger(explicit) && explicit > 0) return explicit;
+    return parseInt(String(key || "").replace("day",""), 10) || 999;
+  }
+  function sortedDayKeys(){
+    return Object.keys(WORKOUT_PLAN).sort((a,b)=>{
+      const diff = getWorkoutOrderValue(a) - getWorkoutOrderValue(b);
+      return diff !== 0 ? diff : String(a).localeCompare(String(b));
+    });
+  }
+  function normalizeWorkoutPlanOrder(){
+    sortedDayKeys().forEach((key, index)=>{
+      if(!WORKOUT_PLAN[key]) return;
+      WORKOUT_PLAN[key].order = index + 1;
+      WORKOUT_PLAN[key].label = `DAY ${index + 1}`;
+    });
+  }
+  function getExerciseTargetSets(exercise){
+    const sets = parseInt(exercise?.sets || 0, 10);
+    return Math.max(sets, 1);
+  }
 
   // ─── FIREBASE ───
   // Data is stored under ONE shared doc "data_shared" so both profiles
@@ -646,21 +659,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             profileData.bodyweight ||
             profileData.health
           );
-          if (activeProfile === "revan") {
-            WORKOUT_PLAN = profileData.plan ? deepCopy(profileData.plan) : (d.plan ? deepCopy(d.plan) : seedPlan(activeProfile));
-            state.workouts      = profileData.workouts      || d.workouts      || {};
-            state.prs           = profileData.prs           || d.prs           || {};
-            state.savedWorkouts = profileData.savedWorkouts || d.savedWorkouts || {};
-            state.gymUrl        = profileData.gymUrl        || d.gymUrl        || "";
-            state.allUserWorkouts = pd;
-          } else {
-            WORKOUT_PLAN = profileData.plan ? deepCopy(profileData.plan) : seedPlan(activeProfile);
-            state.workouts      = profileData.workouts      || {};
-            state.prs           = profileData.prs           || {};
-            state.savedWorkouts = profileData.savedWorkouts || {};
-            state.gymUrl        = profileData.gymUrl        || "";
-            state.allUserWorkouts = null;
-          }
+          WORKOUT_PLAN = d.plan ? deepCopy(d.plan) : (profileData.plan ? deepCopy(profileData.plan) : seedPlan(activeProfile));
+          state.workouts      = d.workouts      || profileData.workouts      || {};
+          state.prs           = profileData.prs           || d.prs           || {};
+          state.savedWorkouts = profileData.savedWorkouts || d.savedWorkouts || {};
+          state.gymUrl        = profileData.gymUrl        || d.gymUrl        || "";
+          state.allUserWorkouts = activeProfile === "revan" ? pd : null;
+          normalizeWorkoutPlanOrder();
           latestAppVersion    = d.latestAppVersion || APP_VERSION;
           appUpdateUrl        = d.appUpdateUrl     || appUpdateUrl || "";
           latestAppUpdatedAt  = d.latestAppUpdatedAt || "";
@@ -671,7 +676,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           state.visualProgress = Array.isArray(profileData.visualProgress) ? profileData.visualProgress : [];
           applyUserOverrides(state.userOverrides);
           saveLocalSnapshot(activeProfile);
-          if(!profileData.plan) saveData();
+          if((!d.plan && profileData.plan) || (!d.workouts && profileData.workouts)) saveData();
+          if(!profileData.plan && !d.plan && Object.keys(WORKOUT_PLAN||{}).length) saveData();
           if(activeProfile === "revan" && !hasScopedData && (d.plan || d.workouts || d.prs || d.savedWorkouts || d.gymUrl)) saveData();
           if(hasAppUpdate() && lastUpdateToastVersion!==latestAppVersion){
             lastUpdateToastVersion = latestAppVersion;
@@ -685,6 +691,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           else console.warn('[IronLog] WARNING: workouts object is empty after load!');
         } else {
           WORKOUT_PLAN = seedPlan(activeProfile);
+          normalizeWorkoutPlanOrder();
           state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{}, visualProgress:[] };
           applyUserOverrides({});
           latestAppVersion = APP_VERSION;
@@ -710,6 +717,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   async function saveData(){
     try {
+      normalizeWorkoutPlanOrder();
       saveLocalSnapshot(activeProfile);
       const payload = {
         profileData: {
@@ -730,10 +738,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         // Backward-compat cleanup for legacy dotted-field writes
         [`profileData.${activeProfile}`]: null
       };
-      // Keep shared legacy fields in sync for Revan so fallback reads don't restore deleted days.
+      payload.plan = WORKOUT_PLAN || {};
+      payload.workouts = state.workouts || {};
       if(activeProfile==="revan"){
-        payload.plan = WORKOUT_PLAN || {};
-        payload.workouts = state.workouts || {};
         payload.prs = state.prs || {};
         payload.savedWorkouts = state.savedWorkouts || {};
         payload.gymUrl = state.gymUrl || "";
@@ -1339,12 +1346,21 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   function getDaysWorkedThisMonth(){
     const p=getMonthKey(),s=new Set();
-    Object.keys(state.workouts||{}).forEach(d=>{ if(d.startsWith(p)&&Object.values(state.workouts[d]).some(x=>sessionHasLoggedActivity(x)))s.add(d); });
+    Object.keys(state.workouts||{}).forEach(d=>{ if(d.startsWith(p)&&getCalendarWorkedMeta(d).worked)s.add(d); });
     return s.size;
   }
   function getTotalExDoneThisMonth(){
     const p=getMonthKey(); let t=0;
-    Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; Object.values(state.workouts[d]).forEach(day=>{ Object.values(day.exercises||{}).forEach(e=>{ if(e.checked)t++; }); }); });
+    Object.keys(state.workouts||{}).forEach(d=>{
+      if(!d.startsWith(p))return;
+      Object.keys(state.workouts[d] || {}).forEach(dayKey=>{
+        const day = state.workouts[d][dayKey];
+        Object.keys(day?.exercises || {}).forEach(exKey=>{
+          const owner = String(exKey || "").includes("_") ? String(exKey).split("_")[0] : activeProfile;
+          if(owner===activeProfile && day.exercises?.[exKey]?.checked) t++;
+        });
+      });
+    });
     return t;
   }
   function calcStreak(){
@@ -1393,13 +1409,26 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     return planned > 0 ? Math.round((completed / planned) * 100) : 0;
   }
   function getWeeklyFreq(){
-    const w=["Wk 1","Wk 2","Wk 3","Wk 4"],c=[0,0,0,0],p=getMonthKey();
-    getVisibleWorkedDates().forEach(d=>{ if(!String(d).startsWith(p)) return; const i=Math.min(Math.floor((new Date(d+"T12:00:00").getDate()-1)/7),3); c[i]++; });
-    return {w,c};
+    const w=["Wk 1","Wk 2","Wk 3","Wk 4"],c=[0,0,0,0],colors=[PROFILES[activeProfile]?.color||"#e85d04",PROFILES[activeProfile]?.color||"#e85d04",PROFILES[activeProfile]?.color||"#e85d04",PROFILES[activeProfile]?.color||"#e85d04"],p=getMonthKey();
+    const weeklyDayCounts = [{},{},{},{}];
+    Object.keys(state.workouts||{}).forEach(d=>{
+      if(!String(d).startsWith(p)) return;
+      Object.keys(state.workouts[d] || {}).forEach(key=>{
+        if(!sessionHasActivityForParticipant(state.workouts[d][key], key, activeProfile)) return;
+        const i=Math.min(Math.floor((new Date(d+"T12:00:00").getDate()-1)/7),3);
+        c[i]++;
+        weeklyDayCounts[i][key]=(weeklyDayCounts[i][key]||0)+1;
+      });
+    });
+    weeklyDayCounts.forEach((bucket, index)=>{
+      const topKey = Object.keys(bucket).sort((a,b)=>bucket[b]-bucket[a])[0];
+      if(topKey && WORKOUT_PLAN[topKey]?.color) colors[index] = WORKOUT_PLAN[topKey].color;
+    });
+    return {w,c,colors};
   }
   function getDayTypeBreakdown(){
     const p=getMonthKey(),b={}; Object.keys(WORKOUT_PLAN).forEach(k=>b[k]=0);
-    Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>{ if(sessionHasLoggedActivity(state.workouts[d][k]) || state.workouts[d][k]?.done)b[k]=(b[k]||0)+1; }); });
+    Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>{ if(sessionHasActivityForParticipant(state.workouts[d][k], k, activeProfile))b[k]=(b[k]||0)+1; }); });
     return b;
   }
   function getMonthTonnage(){
@@ -1824,6 +1853,24 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       return false;
     });
   }
+  function sessionHasActivityForParticipant(wo, dayKey, participant=activeProfile){
+    if(!wo) return false;
+    const day = WORKOUT_PLAN?.[dayKey];
+    const scopedParticipants = wo.sessionParticipants || day?.participants || [];
+    if(wo.done && scopedParticipants.includes(participant)) return true;
+    return Object.keys(wo.exercises || {}).some(exKey=>{
+      const clean = String(exKey || "");
+      const owner = clean.includes("_") ? clean.split("_")[0] : participant;
+      if(owner !== participant) return false;
+      const entry = wo.exercises?.[exKey];
+      if(!entry) return false;
+      if(entry.checked) return true;
+      if(parseFloat(entry.weight || 0) > 0) return true;
+      if(parseFloat(entry.actualReps || 0) > 0) return true;
+      if(Array.isArray(entry.coverSets) && entry.coverSets.length) return true;
+      return false;
+    });
+  }
 
   function getRecentDashboardSessions(limit=3){
     const items = [];
@@ -1917,25 +1964,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   }
   function getCalendarWorkedMeta(ds){
     const wd = state.workouts?.[ds];
-    let worked = !!(wd && Object.values(wd).some(x=>x.done));
-    let otherUserColor = null;
-    let sourceUser = activeProfile;
-    if(!worked && activeProfile==="revan" && state.allUserWorkouts){
-      Object.keys(state.allUserWorkouts).forEach(pk=>{
-        if(worked || pk===activeProfile) return;
-        const u = state.allUserWorkouts[pk];
-        if(u?.workouts?.[ds]){
-          const uDone = Object.keys(u.workouts[ds]).filter(k=>u.workouts[ds][k].done);
-          if(uDone.length>0){
-            worked = true;
-            sourceUser = pk;
-            if(!otherUserColor && u.plan && u.plan[uDone[0]]) otherUserColor = u.plan[uDone[0]].color;
-            if(!otherUserColor) otherUserColor = PROFILES[pk]?.color;
-          }
-        }
-      });
-    }
-    return { worked, otherUserColor, sourceUser };
+    let worked = false;
+    let workoutColor = null;
+    Object.keys(wd || {}).forEach(key=>{
+      if(worked) return;
+      if(sessionHasActivityForParticipant(wd[key], key, activeProfile)){
+        worked = true;
+        workoutColor = WORKOUT_PLAN[key]?.color || PROFILES[activeProfile]?.color || null;
+      }
+    });
+    return { worked, otherUserColor: workoutColor, sourceUser: activeProfile };
   }
 
   window.openWorkoutFromHistory=function(ds,key){
@@ -2089,24 +2127,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     for(let d=1;d<=dim;d++){
       const ds=`${yr}-${String(mo+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
       const isT=ds===today,isA=ds===activeDate,isFut=ds>today;
-      const wd=state.workouts?.[ds];
       const visible = getCalendarWorkedMeta(ds);
       const worked = visible.worked;
       const otherUserColor = visible.otherUserColor;
-
-      const dks=wd?Object.keys(wd).filter(k=>wd[k].done):[];
-      const dc=dks.length>0?WORKOUT_PLAN[dks[0]]?.color:otherUserColor;
+      const dc=otherUserColor;
       const bday=isBirthday(ds);
-      const skip=isSkipped(ds);
-      const isUnlocked=unlockedDates.has(ds);
-      const isPast=!isFut&&!isT;
-      h+=`<div class="cal-cell ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''}${skip&&!isFut?' skipped':''} ${isFut?'future':''} ${bday?'bday':''} ${isUnlocked?'unlocked':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
+      h+=`<div class="cal-cell ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''} ${isFut?'future':''} ${bday?'bday':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
         <span class="cal-n">${d}</span>
         ${dc?`<span class="cal-dot" style="background:${dc}"></span>`:''}
-        ${skip&&!isFut?`<span class="cal-x">✕</span>`:''}
         ${bday?`<span class="cal-bd">🎂</span>`:''}
-        ${isPast&&!isUnlocked?`<button class="cal-unlock-btn" onclick="unlockDate(event,'${ds}')" title="Unlock for editing">🔓</button>`:''}
-        ${isUnlocked?`<span class="cal-unlocked-badge">🔓</span>`:''}
       </div>`;
     }
     h+=`</div>`; cal.innerHTML=h;
@@ -2115,14 +2144,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function renderCharts(){
     if(!dashboardOpen)return;
     const ac=PROFILES[activeProfile].color;
-    const {w,c}=getWeeklyFreq();
-    const gopt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:13}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"},stepSize:1},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}};
-    if(freqChart){freqChart.data.datasets[0].data=c;freqChart.data.datasets[0].backgroundColor=ac+'aa';freqChart.data.datasets[0].borderColor=ac;freqChart.update();}
-    else freqChart=new Chart(document.getElementById("freqChart"),{type:"bar",data:{labels:w,datasets:[{label:"Workouts",data:c,backgroundColor:ac+'aa',borderColor:ac,borderWidth:2,borderRadius:6}]},options:gopt});
+    const {w,c,colors}=getWeeklyFreq();
+    const gopt={responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:13}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"},stepSize:1},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}};
+    if(freqChart){freqChart.data.datasets[0].data=c;freqChart.data.datasets[0].backgroundColor=colors;freqChart.data.datasets[0].borderColor=colors;freqChart.update();}
+    else freqChart=new Chart(document.getElementById("freqChart"),{type:"bar",data:{labels:w,datasets:[{label:"Workouts",data:c,backgroundColor:colors,borderColor:colors,borderWidth:2,borderRadius:6}]},options:gopt});
     const bd=getDayTypeBreakdown();
     const bData=sortedDayKeys().map(k=>bd[k]),bColors=sortedDayKeys().map(k=>WORKOUT_PLAN[k].color),bLab=sortedDayKeys().map(k=>WORKOUT_PLAN[k].title);
     if(volChart){volChart.data.datasets[0].data=bData;volChart.update();}
-    else volChart=new Chart(document.getElementById("volChart"),{type:"doughnut",data:{labels:bLab,datasets:[{data:bData,backgroundColor:bColors,borderColor:"#111",borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{color:"#aaa",font:{family:"Barlow Condensed",size:12},padding:10,boxWidth:12}}}}});
+    else volChart=new Chart(document.getElementById("volChart"),{type:"doughnut",data:{labels:bLab,datasets:[{data:bData,backgroundColor:bColors,borderColor:"#111",borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{color:"#aaa",font:{family:"Barlow Condensed",size:12},padding:10,boxWidth:12}},ironlogValueLabels:{enabled:true}}}});
     const td=getMonthTonnage();
     const tL=td.map(x=>x.label),tV=td.map(x=>x.tonnage),tC=td.map(x=>WORKOUT_PLAN[x.dayKey]?.color||ac);
     if(tonnageChart){tonnageChart.data.labels=tL;tonnageChart.data.datasets[0].data=tV;tonnageChart.data.datasets[0].backgroundColor=tC;tonnageChart.update();}
@@ -2136,7 +2165,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const mvm=getMonthVolumeByMuscleGroup();
     const mvLabels=['CHEST','BACK','SHOULDERS','ARMS','LEGS','CORE'],mvData=[mvm.chest,mvm.back,mvm.shoulders,mvm.arms,mvm.legs,mvm.core],mvColors=['#e85d04','#4361ee','#2ec4b6','#f72585','#7b2d8b','#f0c040'];
     if(window.muscleVolChart){window.muscleVolChart.data.datasets[0].data=mvData;window.muscleVolChart.update();}
-    else {const mvCanvas=document.getElementById('muscleVolChart');if(mvCanvas)window.muscleVolChart=new Chart(mvCanvas,{type:'doughnut',data:{labels:mvLabels,datasets:[{data:mvData,backgroundColor:mvColors,borderColor:'#111',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#aaa',font:{family:'Barlow Condensed',size:11},padding:10,boxWidth:12}}}}});}
+    else {const mvCanvas=document.getElementById('muscleVolChart');if(mvCanvas)window.muscleVolChart=new Chart(mvCanvas,{type:'doughnut',data:{labels:mvLabels,datasets:[{data:mvData,backgroundColor:mvColors,borderColor:'#111',borderWidth:3}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{color:'#aaa',font:{family:'Barlow Condensed',size:11},padding:10,boxWidth:12}},ironlogValueLabels:{enabled:true}}}});}
   }
 
   function renderWeeklySummary(){
@@ -2219,7 +2248,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const h=ensureHealthEntry(today);
     const adjustedWaterTarget = getAdjustedWaterTarget(activeProfile, today);
     const pt=p.protein||120;
-    const calories=Math.max(0,Math.round(Number(h.calories||0)));
+    const calories=getHealthCalories(h);
+    const meals=getMealsForDate(today);
     const soreness=Math.max(0,Math.min(10,Math.round(Number(h.soreness||0))));
     const wp=Math.min(100,Math.round((h.water/adjustedWaterTarget)*100)), pp=Math.min(100,Math.round((h.protein/pt)*100));
     const ac=PROFILES[activeProfile].color;
@@ -2230,7 +2260,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       <div class="hi"><div class="hl">💧 WATER</div><div class="hc"><button class="ha" onclick="adjHealth('water',-0.25)">−</button><span class="hv">${h.water.toFixed(2)}L / ${adjustedWaterTarget.toFixed(1)}L</span><button class="ha" onclick="adjHealth('water',0.25)">+</button></div><div class="hbar"><div class="hbf" style="width:${wp}%;background:${ac}"></div></div></div>
       <div class="hi"><div class="hl">🧪 SUPPLEMENTS</div><div class="hc"><button class="htb ${h.creatine?'active':''}" style="${h.creatine?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('creatine')">CREATINE ${h.creatine?'✓ TAKEN':'NOT YET'}</button><button class="htb ${h.aminos?'active':''}" style="${h.aminos?'border-color:'+ac+';color:'+ac:''}" onclick="togHealth('aminos')">AMINOS ${h.aminos?'✓ TAKEN':'NOT YET'}</button></div></div>
       <div class="hi"><div class="hl">🥩 PROTEIN</div><div class="hc"><button class="ha" onclick="adjHealth('protein',-5)">−</button><span class="hv">${h.protein}g / ${pt}g</span><button class="ha" onclick="adjHealth('protein',5)">+</button></div><div class="hbar"><div class="hbf" style="width:${pp}%;background:${ac}"></div></div></div>
-      <div class="hi"><div class="hl">🔥 CALORIES</div><div class="hc"><button class="ha" onclick="adjHealth('calories',-50)">−</button><span class="hv">${calories} kcal</span><button class="ha" onclick="adjHealth('calories',50)">+</button></div></div>
+      <div class="hi"><div class="hl">🍽 MEALS</div><div class="hc"><span class="hv">${meals.length} logged · ${calories} kcal</span><button class="htb" onclick="logMealPrompt()">LOG MEAL</button></div></div>
       <div class="hi">
         <div class="hl">😴 SLEEP</div>
         <div class="hc"><span class="hv" id="sleep-value">${h.sleep.toFixed(1)}h</span></div>
@@ -2259,12 +2289,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const waterGlasses=Math.max(0,Math.round((h.water/0.25)));
     const waterTargetGlasses=Math.max(1,Math.round((adjustedWaterTarget/0.25)));
     const proteinPct=Math.min(100,Math.round(((h.protein||0)/proteinTarget)*100));
-    const calories=Math.max(0,Math.round(Number(h.calories||0)));
+    const calories=getHealthCalories(h);
+    const meals=getMealsForDate(today);
     const calorieTarget=Math.max(1800, Math.round((proteinTarget * 12)));
     const caloriesPct=Math.min(100,Math.round((calories/calorieTarget)*100));
     const sleepHours=Math.floor(Number(h.sleep||0));
     const sleepMins=Math.round((Number(h.sleep||0)-sleepHours)*60);
     const sleepPct=Math.min(100,Math.round((Number(h.sleep||0)/8)*100));
+    const mealMarkup = meals.length ? meals.slice().reverse().map(meal=>`
+      <div class="profile-meal-row">
+        <div><strong>${meal.food}</strong><span>${meal.calories} KCAL</span></div>
+        ${meal.locked ? `<em>LEGACY</em>` : `<button onclick="removeMealEntry('${today}','${meal.id}')"><span class="material-symbols-outlined">delete</span></button>`}
+      </div>
+    `).join("") : `<div class="profile-meal-empty">No meals logged today yet.</div>`;
     el.innerHTML=`
       <section class="profile-hero">
         <button class="profile-avatar profile-avatar-edit" onclick="triggerProfileAvatarUpload()"><img src="${avatarSrc}" alt="Profile"><span class="material-symbols-outlined">photo_camera</span></button>
@@ -2294,13 +2331,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <div class="profile-habit-card nutrition">
           <div class="profile-habit-main">
             <div class="profile-habit-icon nutrition"><span class="material-symbols-outlined">restaurant</span></div>
-            <div class="profile-habit-copy"><strong>Nutrition</strong><span>TARGET: ${proteinTarget} G PROTEIN</span></div>
+            <div class="profile-habit-copy"><strong>Nutrition</strong><span>${meals.length} MEAL${meals.length===1?"":"S"} · ${calories} KCAL</span></div>
           </div>
           <div class="profile-nutrition-side">
-            <strong>${h.protein||0}</strong><span>PROTEIN</span>
-            <div class="profile-inline-group"><button class="profile-inline-link" onclick="adjHealth('protein',-5)">-5G</button><button class="profile-inline-link" onclick="adjHealth('protein',5)">+5G</button></div>
+            <strong>${calories}</strong><span>KCAL</span>
+            <div class="profile-inline-group"><button class="profile-inline-link" onclick="logMealPrompt()">LOG MEAL</button></div>
           </div>
-          <div class="profile-progress-bar"><div class="profile-progress-fill" style="width:${proteinPct}%"></div></div>
+          <div class="profile-progress-bar"><div class="profile-progress-fill" style="width:${caloriesPct}%"></div></div>
+          <div class="profile-meal-list">${mealMarkup}</div>
         </div>
         <div class="profile-two-col">
           <div class="profile-mini-card">
@@ -2320,7 +2358,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             <div class="profile-habit-icon nutrition"><span class="material-symbols-outlined">local_fire_department</span></div>
             <div><strong>Calories</strong><span>${calories} / ${calorieTarget} KCAL</span></div>
             <div class="profile-progress-bar"><div class="profile-progress-fill calories" style="width:${caloriesPct}%"></div></div>
-            <div class="profile-inline-group"><button class="profile-inline-link" onclick="adjHealth('calories',-100)">-100</button><button class="profile-inline-link" onclick="adjHealth('calories',100)">+100</button></div>
+            <div class="profile-inline-group"><button class="profile-inline-link" onclick="logMealPrompt()">ADD FOOD</button></div>
           </div>
           <div class="profile-mini-card profile-mini-card-muted">
             <div class="profile-habit-icon water"><span class="material-symbols-outlined">water_full</span></div>
@@ -2451,11 +2489,43 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderProfileShell();
   };
   window.logCaloriesPrompt=async function(){
-    const current=ensureHealthEntry(getTodayStr()).calories || "";
-    const next=prompt("Log calories for today", current);
-    if(next===null) return;
-    await setHealthValue('calories', next);
+    await logMealPrompt();
     renderProfileShell();
+  };
+  window.logMealPrompt=async function(dateStr=getTodayStr()){
+    const entry = ensureHealthEntry(dateStr);
+    const food = prompt("What food did you have?", "");
+    if(food===null) return;
+    const cleanFood = String(food || "").trim();
+    if(!cleanFood){
+      toast("⚠️ Enter a food item");
+      return;
+    }
+    const calories = prompt(`Rough calories for "${cleanFood}"`, "");
+    if(calories===null) return;
+    const kcal = Math.max(0, Math.round(Number(calories || 0)));
+    if(!kcal){
+      toast("⚠️ Enter calories");
+      return;
+    }
+    entry.meals.push({
+      id:`meal_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      food: cleanFood,
+      calories: kcal
+    });
+    syncHealthCalories(entry);
+    renderHealthChecklist();
+    renderProfileShell();
+    await saveData();
+    toast(`🍽 ${cleanFood} logged`);
+  };
+  window.removeMealEntry=async function(dateStr, mealId){
+    const entry = ensureHealthEntry(dateStr);
+    entry.meals = (entry.meals || []).filter(meal=>meal?.id !== mealId || meal?.locked);
+    syncHealthCalories(entry);
+    renderHealthChecklist();
+    renderProfileShell();
+    await saveData();
   };
   function isDateKey(v){
     return /^\d{4}-\d{2}-\d{2}$/.test(String(v||""));
@@ -2491,28 +2561,56 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const bucket = getHealthBucket(profileKey);
     const v = bucket[dateStr];
     if(!v || typeof v !== "object" || Array.isArray(v)){
-      bucket[dateStr]={water:0,creatine:false,aminos:false,protein:0,calories:0,sleep:0,soreness:0};
+      bucket[dateStr]={water:0,creatine:false,aminos:false,protein:0,calories:0,caloriesManual:0,sleep:0,soreness:0,meals:[]};
     }
     const entry = bucket[dateStr];
     if(typeof entry.water !== "number") entry.water = Number(entry.water || 0);
     if(typeof entry.protein !== "number") entry.protein = Number(entry.protein || 0);
     if(typeof entry.calories !== "number") entry.calories = Number(entry.calories || 0);
+    if(typeof entry.caloriesManual !== "number") entry.caloriesManual = Number(entry.caloriesManual ?? (entry.calories || 0));
     if(typeof entry.sleep !== "number") entry.sleep = Number(entry.sleep || 0);
     if(typeof entry.soreness !== "number") entry.soreness = Number(entry.soreness || 0);
     if(typeof entry.creatine !== "boolean") entry.creatine = !!entry.creatine;
     if(typeof entry.aminos !== "boolean") entry.aminos = !!entry.aminos;
+    if(!Array.isArray(entry.meals)) entry.meals = [];
+    if(entry.calories > 0 && entry.meals.length === 0 && !entry._legacyCaloriesMigrated){
+      entry.meals = [{
+        id:`legacy_${dateStr}`,
+        food:"Previous calories",
+        calories:Number(entry.calories || 0),
+        locked:true
+      }];
+      entry.caloriesManual = 0;
+      entry._legacyCaloriesMigrated = true;
+    }
+    entry.calories = getHealthCalories(entry);
     return entry;
+  }
+  function getHealthCalories(entry){
+    if(!entry || typeof entry !== "object") return 0;
+    const mealCalories = (Array.isArray(entry.meals) ? entry.meals : []).reduce((sum, meal)=>sum + Math.max(0, Number(meal?.calories || 0)), 0);
+    return Math.round(Math.max(0, Number(entry.caloriesManual || 0)) + mealCalories);
+  }
+  function syncHealthCalories(entry){
+    if(!entry || typeof entry !== "object") return 0;
+    entry.calories = getHealthCalories(entry);
+    return entry.calories;
+  }
+  function getMealsForDate(dateStr=getTodayStr(), profileKey=activeProfile){
+    return ensureHealthEntry(dateStr, profileKey).meals || [];
   }
   window.adjHealth=async function(k,d){
     const t=getTodayStr();
     const entry = ensureHealthEntry(t);
-    const current = Number(entry[k] || 0);
+    const current = Number(k==="calories" ? entry.caloriesManual || 0 : entry[k] || 0);
     let next = current + d;
     if(k==="protein" || k==="calories") next = Math.round(next);
     else if(k==="water") next = Math.round(next * 100) / 100;
     else if(k==="sleep") next = Math.round(next * 10) / 10;
     else next = Math.round(next * 100) / 100;
-    entry[k] = Math.max(0, next);
+    if(k==="calories") entry.caloriesManual = Math.max(0, next);
+    else entry[k] = Math.max(0, next);
+    syncHealthCalories(entry);
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
@@ -2540,8 +2638,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     else if(k==="sleep") next = Math.round(next * 10) / 10;
     else if(k==="soreness") next = Math.round(next);
     else next = Math.round(next * 100) / 100;
-    entry[k] = Math.max(0, next);
-    if(k==="soreness") entry[k] = Math.min(10, entry[k]);
+    if(k==="calories") entry.caloriesManual = Math.max(0, next);
+    else {
+      entry[k] = Math.max(0, next);
+      if(k==="soreness") entry[k] = Math.min(10, entry[k]);
+    }
+    syncHealthCalories(entry);
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
@@ -2561,15 +2663,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const muscleVol = { chest: 0, back: 0, shoulders: 0, arms: 0, legs: 0, core: 0, other: 0 };
     Object.keys(wo).forEach(dayKey => {
       const session = wo[dayKey];
-      if (!sessionHasLoggedActivity(session) && !session?.done) return;
+      if (!sessionHasActivityForParticipant(session, dayKey, activeProfile)) return;
       const day = WORKOUT_PLAN[dayKey];
       if (!day) return;
       day.exercises.forEach(ex => {
         const muscle = getMuscleGroup(ex.name);
-        const hasActivity = (day.participants||[activeProfile]).some(pp=>{
-          const { data } = getExData(session.exercises||{}, pp, ex.name);
-          return data?.checked || parseFloat(data?.weight||0)>0 || parseFloat(data?.actualReps||0)>0 || (Array.isArray(data?.coverSets) && data.coverSets.length);
-        });
+        const { data } = getExData(session.exercises||{}, activeProfile, ex.name);
+        const hasActivity = data?.checked || parseFloat(data?.weight||0)>0 || parseFloat(data?.actualReps||0)>0 || (Array.isArray(data?.coverSets) && data.coverSets.length) || ((session.sessionParticipants||day.participants||[]).includes(activeProfile) && session.done);
         if(hasActivity) muscleVol[muscle] = (muscleVol[muscle] || 0) + (ex.sets || 0);
       });
     });
@@ -2831,7 +2931,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const todayStr=getTodayStr();
     const isToday=activeDate===todayStr;
     const isPastDate=activeDate<todayStr;
-    const isEditable=isToday||unlockedDates.has(activeDate);
+    const isEditable=true;
     const wo=getWorkout(activeDate,key);
     const panel=document.getElementById("day-panel");
     const planParticipants=day.participants||['revan'];
@@ -2843,7 +2943,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const ton=calcSessionTonnage(activeDate,key);
     const activeExerciseIndex=Math.max(0, day.exercises.findIndex(ex=>participants.some(pp=>!getExData(wo.exercises,pp,ex.name).data?.checked)));
     const activeExercise=day.exercises[activeExerciseIndex] || day.exercises[0] || null;
-    const canReorderQueue=!sessionInterval||sessionPaused;
+    const canReorderQueue=isEditable;
     const queue=(day.exercises||[]).map((ex,index)=>({ ex, index, ...getExerciseCompletionState(wo,participants,ex.name) }));
     const participantSelectors=isEditable && trackableParticipants.length>1 ? `<div class="active-track-switches">${trackableParticipants.map(pp=>{
       const pcolor=PROFILES[pp]?.color||'#888';
@@ -2859,11 +2959,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const currentWeight=parseFloat(ed.weight||lastWeight?.weight||20) || 20;
       const currentReps=parseInt(ed.actualReps||activeExercise.reps||8,10) || 8;
       const setHistory=Array.isArray(ed.coverSets)?ed.coverSets:[];
+      const targetSets=getExerciseTargetSets(activeExercise);
+      const loggedSets=Math.min(setHistory.length, targetSets);
+      const setPct=Math.min(100, Math.round((loggedSets/targetSets)*100));
+      const nextSetNumber=Math.min(loggedSets + 1, targetSets);
       const ptime=getWorkoutTimeEntry(activeDate,key,pp);
       const pcolor=PROFILES[pp]?.color||'#888';
       return `<section class="active-participant-card ${ed.checked?'complete':''}" style="--participant:${pcolor}">
         <div class="active-participant-head">
-          <div><span class="active-participant-name">${PROFILES[pp]?.label||pp}</span><span class="active-participant-meta">${ed.checked?'Exercise complete':'In progress'}</span></div>
+          <div><span class="active-participant-name">${PROFILES[pp]?.label||pp}</span><span class="active-participant-meta">${ed.checked?'Exercise complete':`${loggedSets}/${targetSets} sets logged`}</span></div>
           <div class="active-participant-time">
             <input type="time" class="active-inline-input" value="${ptime.at||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutTimeAt('${key}','${pp}',this.value)">
             <input type="number" class="active-inline-input active-inline-input-sm" min="0" max="480" step="1" value="${ptime.durationMins||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutDuration('${key}','${pp}',this.value)">
@@ -2875,11 +2979,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         </div>
         <div class="active-workout-stats-row">
           <div class="active-workout-stat"><span>Previous Best</span><strong>${lastWeight?.weight || "—"} <em>kg</em></strong></div>
-          <div class="active-workout-stat"><span>Target Reps</span><strong>${activeExercise.reps || "—"} <em>reps</em></strong></div>
+          <div class="active-workout-stat"><span>Set Progress</span><strong>${loggedSets}/${targetSets} <em>${setPct}%</em></strong></div>
         </div>
-        <button class="active-workout-log" ${!isEditable||ed.checked?'disabled':''} onclick="finishActiveExercise('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined">check_circle</span><span>Finish Exercise</span></button>
+        <button class="active-workout-log" ${!isEditable||ed.checked?'disabled':''} onclick="finishActiveExercise('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined">skip_next</span><span>Next Exercise</span><em>${ed.checked?'DONE':`SET ${nextSetNumber} OF ${targetSets}`}</em></button>
         ${ed.checked && isEditable ? `<button class="active-secondary-btn" onclick="reopenExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Reopen</button>` : ""}
-        <div class="active-workout-history"><div class="active-workout-history-head"><h4>Exercise Log</h4><span>${setHistory.length ? `${setHistory.length} logged` : `${activeExercise.sets || 0} target sets`}</span></div><div class="active-workout-history-list">${setHistory.length ? setHistory.map((set, index)=>`<div class="active-set-row"><div><strong>${String(index+1).padStart(2,"0")}</strong><span>${set.weight || 0}kg × ${set.reps || 0} reps</span></div><span class="material-symbols-outlined">check_circle</span></div>`).join("") : `<div class="active-set-row active-set-row-empty"><div><strong>00</strong><span>No logged set snapshots yet</span></div><span class="material-symbols-outlined">hourglass_empty</span></div>`}</div></div>
+        <div class="active-workout-history"><div class="active-workout-history-head"><h4>Exercise Log</h4><span>${setHistory.length ? `${setHistory.length} logged` : `${targetSets} target sets`}</span></div><div class="active-workout-history-list">${setHistory.length ? setHistory.map((set, index)=>`<div class="active-set-row"><div><strong>${String(index+1).padStart(2,"0")}</strong><span>${set.weight || 0}kg × ${set.reps || 0} reps</span></div><span class="material-symbols-outlined">check_circle</span></div>`).join("") : `<div class="active-set-row active-set-row-empty"><div><strong>00</strong><span>No logged set snapshots yet</span></div><span class="material-symbols-outlined">hourglass_empty</span></div>`}</div></div>
       </section>`;
     }).join("") : `<div class="activity-empty">No exercises in this workout yet.</div>`;
     const swipeControls=participants.length>1 ? `<div class="active-swipe-head"><button class="active-swipe-btn" onclick="shiftActiveWorkoutParticipant('${key}',-1)"><span class="material-symbols-outlined">chevron_left</span></button><span class="active-swipe-label">${PROFILES[displayedParticipants[0]]?.label||displayedParticipants[0]} · ${activeWorkoutParticipantIndex+1}/${participants.length}</span><button class="active-swipe-btn" onclick="shiftActiveWorkoutParticipant('${key}',1)"><span class="material-symbols-outlined">chevron_right</span></button></div>` : "";
@@ -2892,11 +2996,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       </div>
       <div class="active-workout-visual"><div class="active-workout-overlay"><div class="active-workout-stat"><span>Workout</span><strong>${day.title}</strong></div><div class="active-workout-stat"><span>Progress</span><strong>${pct}<em>%</em></strong></div></div></div>
       ${participantSelectors}
-      <div class="active-panel-meta"><span>${formatDate(activeDate)}</span>${ton>0?`<span>${ton}kg moved</span>`:""}${!isEditable?`<span>VIEW ONLY</span>${isPastDate?'<button class="active-secondary-inline" onclick="unlockActiveDate()">Unlock</button>':''}`:""}</div>
+      <div class="active-panel-meta"><span>${formatDate(activeDate)}</span>${ton>0?`<span>${ton}kg moved</span>`:""}${isPastDate?`<span>HISTORY EDIT MODE</span>`:""}</div>
       ${swipeControls}
       ${participantCards}
-      ${nextExercise ? `<button class="active-workout-next" onclick="document.getElementById('queue-item-${nextExercise.index}')?.scrollIntoView({behavior:'smooth',block:'center'})"><div><span>Next Exercise</span><strong>${nextExercise.ex.name}</strong></div><em>${nextExercise.ex.sets || 0} sets</em></button>` : ""}
-      <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Paused or not started: reorder enabled':'Pause to reorder next exercises'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${item.ex.sets || 0} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div></section>
+      ${nextExercise ? `<button class="active-workout-next" onclick="document.getElementById('queue-item-${nextExercise.index}')?.scrollIntoView({behavior:'smooth',block:'center'})"><div><span>Next Exercise</span><strong>${nextExercise.ex.name}</strong></div><em>${getExerciseTargetSets(nextExercise.ex)} sets</em></button>` : ""}
+      <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Reorder is live during the workout':'Reorder unavailable'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${getExerciseTargetSets(item.ex)} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div></section>
       <section class="active-session-note"><label>Session Note</label><textarea id="snote-${key}" class="active-note-input" ${!isEditable?'disabled':''} placeholder="How did this session feel?">${sessionNote}</textarea>${isEditable?`<button class="active-secondary-btn" onclick="saveSessionNote('${key}')">Save Note</button>`:""}</section>
     </section>`;
     panel.style.display="block";
@@ -3484,6 +3588,77 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     panel.style.display="block";
     syncWorkoutFocusState();
   }
+  function getCalendarDayEntries(ds){
+    return Object.keys(state.workouts?.[ds] || {}).map(key=>{
+      const wo = state.workouts?.[ds]?.[key];
+      const day = WORKOUT_PLAN[key];
+      if(!wo || !day) return null;
+      if(!sessionHasActivityForParticipant(wo, key, activeProfile)) return null;
+      const exercises = Object.keys(wo.exercises || {}).filter(exKey=>{
+        const owner = String(exKey || "").includes("_") ? String(exKey).split("_")[0] : activeProfile;
+        return owner === activeProfile;
+      }).length;
+      return {
+        key,
+        day,
+        note: wo.notes || "",
+        tonnage: calcSessionTonnage(ds, key),
+        exercises
+      };
+    }).filter(Boolean);
+  }
+  function openCalendarDayModal(ds){
+    const modal = document.getElementById("calendar-day-modal");
+    const body = document.getElementById("calendar-day-modal-body");
+    const title = document.getElementById("calendar-day-modal-title");
+    if(!modal || !body || !title) return;
+    calendarDayModalDate = ds;
+    title.textContent = formatDate(ds);
+    const entries = getCalendarDayEntries(ds);
+    body.innerHTML = entries.length ? entries.map(entry=>`
+      <div class="calendar-day-entry">
+        <div class="calendar-day-entry-copy">
+          <strong style="color:${entry.day.color}">${entry.day.label} · ${entry.day.title}</strong>
+          <span>${entry.day.subtitle || "Workout"}</span>
+          <span>${entry.exercises} exercise log${entry.exercises===1?"":"s"}${entry.tonnage>0?` · ${entry.tonnage}kg moved`:""}</span>
+          ${entry.note ? `<p>${entry.note}</p>` : ""}
+        </div>
+        <div class="calendar-day-entry-actions">
+          <button class="st-ab" onclick="openCalendarDayWorkout('${ds}','${entry.key}')">EDIT</button>
+          <button class="st-ab template-btn-del" onclick="deleteWorkoutHistoryEntry('${ds}','${entry.key}')">DELETE</button>
+        </div>
+      </div>
+    `).join("") : `<div class="activity-empty">No workout activity logged for this day.</div>`;
+    modal.style.display = "flex";
+  }
+  window.closeCalendarDayModal=function(){
+    const modal = document.getElementById("calendar-day-modal");
+    if(modal) modal.style.display = "none";
+    calendarDayModalDate = "";
+  };
+  window.openCalendarDayWorkout=function(ds,key){
+    closeCalendarDayModal();
+    activeDate = ds;
+    selectDay(key);
+  };
+  window.deleteWorkoutHistoryEntry=async function(ds,key){
+    if(!state.workouts?.[ds]?.[key]) return;
+    const dayTitle = WORKOUT_PLAN[key]?.title || key;
+    if(!confirm(`Delete ${dayTitle} from ${formatDate(ds)}?`)) return;
+    delete state.workouts[ds][key];
+    if(Object.keys(state.workouts[ds]).length===0) delete state.workouts[ds];
+    if(activeDay===key && activeDate===ds){
+      activeDay = null;
+      const panel = document.getElementById("day-panel");
+      if(panel) panel.style.display = "none";
+    }
+    renderCalendar();
+    renderStats();
+    renderCharts();
+    renderDateSummary(ds);
+    openCalendarDayModal(ds);
+    await saveData();
+  };
 
   // ─── ACTIONS ───
   function unlockDateForEditing(ds){
@@ -3507,7 +3682,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     document.querySelectorAll(".day-card").forEach(c=>c.classList.remove("active"));
     syncWorkoutFocusState();
     hideCoverPlayer();
-    renderCalendar(); renderDateSummary(ds);
+    renderCalendar(); renderDateSummary(ds); openCalendarDayModal(ds);
   };
   window.selectDay=function(key){
     activeDay=key; panelCollapsed=false;
@@ -3568,18 +3743,18 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const weight=parseFloat(target.weight||entry.weight||0) || 0;
     const reps=parseInt(target.actualReps||entry.actualReps||0,10) || 0;
     if(!Array.isArray(target.coverSets)) target.coverSets=[];
-    if(weight>0 || reps>0){
-      const last=target.coverSets[target.coverSets.length-1];
-      if(!last || Number(last.weight)!==weight || Number(last.reps)!==reps){
-        target.coverSets.push({weight,reps,ts:Date.now()});
-      }
-    }
-    target.checked=true;
+    target.coverSets.push({weight,reps,ts:Date.now()});
+    const planned = WORKOUT_PLAN[key]?.exercises?.find(ex=>ex.name===exerciseName);
+    const targetSets = getExerciseTargetSets(planned);
+    const loggedSets = target.coverSets.length;
+    target.checked = loggedSets >= targetSets;
     const cleanName=String(exerciseName||"").replace(/'/g,"");
-    if(weight>0 && checkPR(exKey,weight,key,activeDate,participant||activeProfile)){
+    if(target.checked && weight>0 && checkPR(exKey,weight,key,activeDate,participant||activeProfile)){
       toast(`🏆 NEW PR — ${cleanName} @ ${weight}kg!`);
+    } else if(target.checked) {
+      toast(`✓ ${PROFILES[participant]?.label||participant}: ${cleanName} complete`);
     } else {
-      toast(`✓ ${PROFILES[participant]?.label||participant}: ${cleanName} finished`);
+      toast(`✓ ${PROFILES[participant]?.label||participant}: set ${loggedSets}/${targetSets}`);
     }
     renderDayPanel(key);
     renderStats();
@@ -3592,6 +3767,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const {key:exKey}=getExData(wo.exercises,participant,exerciseName);
     if(!wo.exercises[exKey]) return;
     wo.exercises[exKey].checked=false;
+    const planned = WORKOUT_PLAN[key]?.exercises?.find(ex=>ex.name===exerciseName);
+    const targetSets = getExerciseTargetSets(planned);
+    if(Array.isArray(wo.exercises[exKey].coverSets)){
+      wo.exercises[exKey].coverSets = wo.exercises[exKey].coverSets.slice(0, Math.max(targetSets - 1, 0));
+    }
     renderDayPanel(key);
     await saveData();
   };
@@ -3604,15 +3784,34 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderDayPanel(key);
     await saveData();
   };
+  window.moveWorkoutDay=async function(key,dir){
+    const keys = sortedDayKeys();
+    const from = keys.indexOf(key);
+    const to = from + dir;
+    if(from < 0 || to < 0 || to >= keys.length) return;
+    const [moved] = keys.splice(from, 1);
+    keys.splice(to, 0, moved);
+    keys.forEach((dayKey, index)=>{
+      if(!WORKOUT_PLAN[dayKey]) return;
+      WORKOUT_PLAN[dayKey].order = index + 1;
+      WORKOUT_PLAN[dayKey].label = `DAY ${index + 1}`;
+    });
+    renderDayGrid();
+    if(activeDay) renderDayPanel(activeDay);
+    renderManagement();
+    await saveData();
+  };
   window.logActiveWorkoutSet=async function(key, exKey, participant, displayName){
     const wo=getWorkout(activeDate,key);
     if(!wo.exercises[exKey]) wo.exercises[exKey]={};
     const entry=wo.exercises[exKey];
     const weight=parseFloat(entry.weight||0) || 0;
     const reps=parseInt(entry.actualReps||0,10) || 0;
-    entry.checked=true;
     if(!Array.isArray(entry.coverSets)) entry.coverSets=[];
     entry.coverSets.push({weight,reps,ts:Date.now()});
+    const exerciseName = stripParticipantPrefix(exKey);
+    const planned = WORKOUT_PLAN[key]?.exercises?.find(ex=>ex.name===exerciseName);
+    entry.checked = entry.coverSets.length >= getExerciseTargetSets(planned);
     if(weight>0 && checkPR(exKey,weight,key,activeDate,participant||activeProfile)){
       toast(`🏆 NEW PR — ${displayName} @ ${weight}kg!`);
     } else {
@@ -3940,7 +4139,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     }
     const rows=document.querySelectorAll("#eel .eer"), newEx=[];
     rows.forEach(r=>{ const n=r.querySelector(".een").value.trim(); const s=parseInt(r.querySelector(".stepper-group")?.dataset.value||0,10)||0; const rp=r.querySelector(".eer2").value.trim()||"12"; if(n)newEx.push({name:n,sets:s,reps:rp}); });
-    WORKOUT_PLAN[key].exercises=newEx; closeEdit();
+    WORKOUT_PLAN[key].exercises=newEx; normalizeWorkoutPlanOrder(); closeEdit();
     if(activeDay===key)renderDayPanel(key);
     await saveData(); toast("✓ WORKOUT UPDATED"); renderDayGrid();
   };
@@ -3988,7 +4187,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     Object.keys(state.prs||{}).forEach(prKey=>{
       if(state.prs?.[prKey]?.dayKey===key) delete state.prs[prKey];
     });
-    delete WORKOUT_PLAN[key]; if(activeDay===key){activeDay=null;document.getElementById("day-panel").style.display="none";}
+    delete WORKOUT_PLAN[key]; normalizeWorkoutPlanOrder(); if(activeDay===key){activeDay=null;document.getElementById("day-panel").style.display="none";}
     closeCardMenu(); renderDayGrid(); renderAll(); await saveData(); toast(`🗑 ${day.title} deleted`);
   };
 
@@ -4041,7 +4240,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const next=nums.length?Math.max(...nums)+1:1;
     const key=`day${next}`;
     const prefilledExercises=template?.exercises?deepCopy(template.exercises):[];
-    WORKOUT_PLAN[key]={label:`DAY ${next}`,weekday:wd>=0?wd:null,title,subtitle:sub||template?.subtitle||title,color:col,exercises:prefilledExercises,participants:['revan']};
+    WORKOUT_PLAN[key]={label:`DAY ${next}`,order:next,weekday:wd>=0?wd:null,title,subtitle:sub||template?.subtitle||title,color:col,exercises:prefilledExercises,participants:['revan']};
+    normalizeWorkoutPlanOrder();
     closeAddDay(); renderDayGrid(); renderAll(); await saveData();
     if(prefilledExercises.length){
       setTimeout(()=>selectDay(key),200);
@@ -4404,7 +4604,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <button class="st-ab" style="width:auto;margin:0;color:#5cba5c;border-color:rgba(92,186,92,.35)" onclick="closeSettings();setTimeout(()=>openAddDay(),60)">+ ADD WORKOUT DAY</button>
       </div>` + (items.length?items.map(k=>{
         const d=WORKOUT_PLAN[k];
-        return `<div class="template-item"><span class="template-name">${d.label} · ${d.title}</span><div class="template-btns"><button class="template-btn-load" onclick="closeSettings();setTimeout(()=>openEdit('${k}'),60)">EDIT</button><button class="template-btn-del" onclick="deleteDay('${k}')">DELETE</button></div></div>`;
+        const index = items.indexOf(k);
+        return `<div class="template-item"><span class="template-name">${d.label} · ${d.title}</span><div class="template-btns"><button class="template-btn-load" ${index===0?'disabled':''} onclick="moveWorkoutDay('${k}',-1)">UP</button><button class="template-btn-load" ${index===items.length-1?'disabled':''} onclick="moveWorkoutDay('${k}',1)">DOWN</button><button class="template-btn-load" onclick="closeSettings();setTimeout(()=>openEdit('${k}'),60)">EDIT</button><button class="template-btn-del" onclick="deleteDay('${k}')">DELETE</button></div></div>`;
       }).join(''):`<div style="color:var(--muted);font-size:.8rem;padding:10px">No workouts found yet.</div>`);
       return;
     }
@@ -5031,3 +5232,44 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     syncBottomNavState();
     window.addEventListener("resize", handleScreenChange);
   });
+  const chartValueLabelPlugin = {
+    id: "ironlogValueLabels",
+    afterDatasetsDraw(chart, _args, opts){
+      if(!opts?.enabled) return;
+      const { ctx } = chart;
+      ctx.save();
+      const drawText = (text, x, y, color="#f3f1ef")=>{
+        ctx.font = "700 11px 'Barlow Condensed', sans-serif";
+        ctx.fillStyle = color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(String(text), x, y);
+      };
+      chart.data.datasets.forEach((dataset, datasetIndex)=>{
+        const meta = chart.getDatasetMeta(datasetIndex);
+        if(meta.hidden) return;
+        meta.data.forEach((element, index)=>{
+          const raw = Array.isArray(dataset.data) ? dataset.data[index] : null;
+          const value = Number(raw || 0);
+          if(!value) return;
+          if(chart.config.type === "bar"){
+            const props = element.getProps(["x","y","base"], true);
+            const y = props.y < props.base ? props.y - 10 : props.y + 10;
+            drawText(value, props.x, y);
+            return;
+          }
+          if(chart.config.type === "doughnut"){
+            const angle = (element.startAngle + element.endAngle) / 2;
+            const radius = (element.innerRadius + element.outerRadius) / 2;
+            const x = element.x + Math.cos(angle) * radius;
+            const y = element.y + Math.sin(angle) * radius;
+            drawText(value, x, y, "#111");
+          }
+        });
+      });
+      ctx.restore();
+    }
+  };
+  if(window.Chart && !Chart.registry.plugins.get("ironlogValueLabels")){
+    Chart.register(chartValueLabelPlugin);
+  }
