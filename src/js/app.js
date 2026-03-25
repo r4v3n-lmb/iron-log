@@ -1896,31 +1896,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   function getRecentDashboardSessions(limit=3){
     const items = [];
-    const pushSession = (ds, key, wo, day)=>{
-      if(!day) return;
-      if(!sessionHasActivityForParticipant(wo, key, activeProfile)) return;
-      const exerciseLines = getHistoryExerciseLines(ds, key);
-      const duration = parseInt(getWorkoutTimeEntry(ds, key, activeProfile)?.durationMins || 0, 10) || 0;
-      const checkedCount = Object.values(wo?.exercises || {}).filter(entry=>entry?.checked).length;
-      items.push({
-        date: ds,
-        key,
-        wo,
-        day,
-        tonnage: calcSessionTonnage(ds, key),
-        checkedCount,
-        duration,
-        exerciseLines
+    getVisibleWorkedDates().forEach(ds=>{
+      getCalendarDayEntries(ds).forEach(entry=>{
+        items.push({
+          date: ds,
+          key: entry.key,
+          wo: entry.wo,
+          day: entry.day,
+          tonnage: entry.tonnage,
+          checkedCount: entry.exercises,
+          duration: entry.durationMins,
+          exerciseLines: entry.exerciseLines
+        });
       });
-    };
-    Object.keys(state.workouts || {}).forEach(ds=>{
-      Object.keys(state.workouts[ds] || {}).forEach(key=>{
-        pushSession(ds, key, state.workouts[ds][key], WORKOUT_PLAN[key]);
-      });
-    });
-    items.sort((a,b)=>{
-      if(a.date === b.date) return (b.wo?.updatedAt || "").localeCompare(a.wo?.updatedAt || "");
-      return b.date.localeCompare(a.date);
     });
     return items.slice(0, limit);
   }
@@ -2023,8 +2011,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().split("T")[0];
-        const visible = getCalendarWorkedMeta(ds);
-        days.push({label:labels[i], worked:visible.worked, isToday:ds===getTodayStr(), date:ds});
+        const entries = getCalendarDayEntries(ds);
+        days.push({label:labels[i], worked:entries.length>0, count:entries.length, isToday:ds===getTodayStr(), date:ds});
       }
       const pct = Math.round((days.filter(x=>x.worked).length / days.length) * 100);
       consistencyEl.innerHTML = `
@@ -2036,6 +2024,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           ${days.map(day=>`
             <button class="consistency-pill ${day.worked ? "done" : ""} ${day.isToday ? "today" : ""}" onclick="navTo('progress');selectDate('${day.date}')">
               <strong>${day.label}</strong>
+              <em>${day.count || 0}</em>
             </button>
           `).join("")}
         </div>
