@@ -525,7 +525,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function getMonthKey(){ return activeDate.slice(0,7); }
   function getTodayDayKey(){
     const dow=new Date().getDay();
-    return Object.keys(WORKOUT_PLAN).find(k=>WORKOUT_PLAN[k].weekday===dow)||null;
+    return Object.keys(WORKOUT_PLAN).find(k=>getWorkoutWeekdaySortValue(WORKOUT_PLAN[k])===getWorkoutWeekdaySortValue({weekday:dow}))||null;
   }
   function getProfileDocId(){ return PROFILES[activeProfile].docId; }
   function getWorkoutOrderValue(key){
@@ -534,8 +534,30 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(Number.isInteger(explicit) && explicit > 0) return explicit;
     return parseInt(String(key || "").replace("day",""), 10) || 999;
   }
+  function getWorkoutWeekdaySortValue(day){
+    const weekday = day?.weekday;
+    if(weekday == null || weekday === "" || Number.isNaN(Number(weekday))) return 99;
+    const parsed = Number(weekday);
+    return parsed === 0 ? 7 : parsed;
+  }
+  function getWorkoutDisplayLabel(key, fallbackIndex=null){
+    const day = WORKOUT_PLAN?.[key] || {};
+    const explicit = String(day.label || "").trim();
+    if(explicit) return explicit;
+    const order = fallbackIndex != null ? fallbackIndex + 1 : getWorkoutOrderValue(key);
+    return `DAY ${order}`;
+  }
+  function getWorkoutWeekdayLabel(weekday){
+    const parsed = Number(weekday);
+    if(Number.isNaN(parsed) || weekday == null || weekday === "") return "—";
+    return ["SUN","MON","TUE","WED","THU","FRI","SAT"][parsed] || "—";
+  }
   function sortedDayKeys(){
     return Object.keys(WORKOUT_PLAN).sort((a,b)=>{
+      const dayA = WORKOUT_PLAN?.[a] || {};
+      const dayB = WORKOUT_PLAN?.[b] || {};
+      const weekdayDiff = getWorkoutWeekdaySortValue(dayA) - getWorkoutWeekdaySortValue(dayB);
+      if(weekdayDiff !== 0) return weekdayDiff;
       const diff = getWorkoutOrderValue(a) - getWorkoutOrderValue(b);
       return diff !== 0 ? diff : String(a).localeCompare(String(b));
     });
@@ -544,7 +566,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     sortedDayKeys().forEach((key, index)=>{
       if(!WORKOUT_PLAN[key]) return;
       WORKOUT_PLAN[key].order = index + 1;
-      WORKOUT_PLAN[key].label = `DAY ${index + 1}`;
+      if(!String(WORKOUT_PLAN[key].label || "").trim()) WORKOUT_PLAN[key].label = `DAY ${index + 1}`;
     });
   }
   function getExerciseTargetSets(exercise){
@@ -1388,10 +1410,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const planWeekday = weekday === 0 ? 7 : weekday;
 
       // Find planned workouts for this weekday
-      const plannedKeys = Object.keys(WORKOUT_PLAN).filter(key =>
-        WORKOUT_PLAN[key].weekday === planWeekday &&
-        WORKOUT_PLAN[key].participants.includes(activeProfile)
-      );
+        const plannedKeys = Object.keys(WORKOUT_PLAN).filter(key =>
+          getWorkoutWeekdaySortValue(WORKOUT_PLAN[key]) === getWorkoutWeekdaySortValue({weekday:planWeekday===7?0:planWeekday}) &&
+          WORKOUT_PLAN[key].participants.includes(activeProfile)
+        );
 
       if (plannedKeys.length > 0) {
         planned += plannedKeys.length;
@@ -1874,52 +1896,33 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   function getRecentDashboardSessions(limit=3){
     const items = [];
-    const pushSession = (ds, key, wo, day, owner=activeProfile)=>{
-      const hasExercises = !!Object.keys(wo?.exercises || {}).length;
-      const hasSessionMeta = !!(wo?.sessionMeta?.startAt || wo?.sessionMeta?.rpe || wo?.sessionMeta?.durationMins);
-      if((!day && !wo?.done && !hasExercises && !hasSessionMeta) || (!day && !sessionHasLoggedActivity(wo))) return;
+    const pushSession = (ds, key, wo, day)=>{
+      if(!day) return;
+      if(!sessionHasActivityForParticipant(wo, key, activeProfile)) return;
+      const exerciseLines = getHistoryExerciseLines(ds, key);
+      const duration = parseInt(getWorkoutTimeEntry(ds, key, activeProfile)?.durationMins || 0, 10) || 0;
       const checkedCount = Object.values(wo?.exercises || {}).filter(entry=>entry?.checked).length;
       items.push({
         date: ds,
         key,
         wo,
-        day: day || { title:"Workout Logged", exercises:[] },
-        owner,
+        day,
         tonnage: calcSessionTonnage(ds, key),
-        checkedCount
+        checkedCount,
+        duration,
+        exerciseLines
       });
     };
-    const ownPlan = state.allUserWorkouts?.[activeProfile]?.plan || WORKOUT_PLAN;
     Object.keys(state.workouts || {}).forEach(ds=>{
       Object.keys(state.workouts[ds] || {}).forEach(key=>{
-        pushSession(ds, key, state.workouts[ds][key], ownPlan?.[key] || WORKOUT_PLAN[key], activeProfile);
+        pushSession(ds, key, state.workouts[ds][key], WORKOUT_PLAN[key]);
       });
     });
-    if(activeProfile==="revan" && state.allUserWorkouts){
-      Object.keys(state.allUserWorkouts).forEach(pk=>{
-        if(pk===activeProfile) return;
-        const userData = state.allUserWorkouts[pk] || {};
-        const plan = userData.plan || {};
-        Object.keys(userData.workouts || {}).forEach(ds=>{
-          Object.keys(userData.workouts?.[ds] || {}).forEach(key=>{
-            pushSession(ds, key, userData.workouts[ds][key], plan[key] || WORKOUT_PLAN[key], pk);
-          });
-        });
-      });
-    }
     items.sort((a,b)=>{
       if(a.date === b.date) return (b.wo?.updatedAt || "").localeCompare(a.wo?.updatedAt || "");
       return b.date.localeCompare(a.date);
     });
-    const deduped = [];
-    const seen = new Set();
-    items.forEach(item=>{
-      const stamp=`${item.owner}|${item.date}|${item.key}`;
-      if(seen.has(stamp)) return;
-      seen.add(stamp);
-      deduped.push(item);
-    });
-    return deduped.slice(0, limit);
+    return items.slice(0, limit);
   }
   function getVisibleActivityFallback(limit=3){
     return getVisibleWorkedDates(limit).map(ds=>{
@@ -2014,31 +2017,26 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const today = new Date(getTodayStr()+"T12:00:00");
       const monday = new Date(today);
       monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-      const labels = ["M","T","W","T","F","S","S"];
+      const labels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
       const days = [];
       for(let i=0;i<7;i++){
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().split("T")[0];
         const visible = getCalendarWorkedMeta(ds);
-        const tonnage = Object.keys(state.workouts?.[ds] || {}).reduce((sum, key)=>sum + calcSessionTonnage(ds, key), 0);
-        const level = !visible.worked ? 0 : tonnage > 2000 ? 1 : tonnage > 500 ? 0.7 : 0.4;
-        days.push({label:labels[i], level, isToday:ds===getTodayStr(), color:visible.otherUserColor});
+        days.push({label:labels[i], worked:visible.worked, isToday:ds===getTodayStr(), date:ds});
       }
-      const pct = Math.round((days.filter(x=>x.level > 0).length / days.length) * 100);
+      const pct = Math.round((days.filter(x=>x.worked).length / days.length) * 100);
       consistencyEl.innerHTML = `
         <div class="dashboard-card-head dashboard-card-head-tight">
-          <h3>WEEKLY CONSISTENCY</h3>
+          <h3>WEEKLY TRACKER</h3>
           <span>${pct}%</span>
         </div>
         <div class="consistency-bars stitch-consistency-bars">
           ${days.map(day=>`
-            <div class="consistency-day ${day.level > 0 ? "done" : ""} ${day.isToday ? "today" : ""}">
-              <div class="consistency-track">
-                <div class="consistency-fill" style="height:${day.level > 0 ? Math.max(Math.round(day.level * 48), 8) : 0}px;opacity:${day.level > 0 ? Math.max(day.level, .18) : 0};${day.color?`background:${day.color};`:''}"></div>
-              </div>
-              <span>${day.label}</span>
-            </div>
+            <button class="consistency-pill ${day.worked ? "done" : ""} ${day.isToday ? "today" : ""}" onclick="navTo('progress');selectDate('${day.date}')">
+              <strong>${day.label}</strong>
+            </button>
           `).join("")}
         </div>
       `;
@@ -2067,9 +2065,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         const metaDate = new Date(item.date+"T12:00:00");
         const daysAgo = Math.max(0, Math.floor((new Date(getTodayStr()+"T12:00:00") - metaDate)/(1000*60*60*24)));
         const when = daysAgo === 0 ? "Today" : daysAgo === 1 ? "Yesterday" : `${daysAgo} days ago`;
-        const ownerLabel = item.owner && item.owner!==activeProfile ? `${accountRegistry[item.owner]?.name || PROFILES[item.owner]?.label || item.owner} • ` : "";
-        const meta = `${ownerLabel}${when}${item.tonnage>0 ? ` • ${item.tonnage.toLocaleString()} kg moved` : ""}`;
-        const sessionMeta = item.wo?.sessionMeta?.rpe ? `RPE ${item.wo.sessionMeta.rpe}` : item.checkedCount > 0 ? `+${item.checkedCount} logged` : `${(item.day.exercises || []).length} exercises`;
+        const meta = `${when}${item.duration>0 ? ` • ${item.duration} mins` : ""}${item.tonnage>0 ? ` • ${item.tonnage.toLocaleString()} kg moved` : ""}`;
+        const sessionMeta = item.exerciseLines?.[0]?.meta || (item.wo?.sessionMeta?.rpe ? `RPE ${item.wo.sessionMeta.rpe}` : item.checkedCount > 0 ? `+${item.checkedCount} logged` : `${(item.day.exercises || []).length} exercises`);
         return `
           <button class="activity-card" onclick="openWorkoutFromHistory('${item.date}','${item.key}')">
             <span class="activity-icon material-symbols-outlined">${icon}</span>
@@ -2301,6 +2298,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const sleepHours=Math.floor(Number(h.sleep||0));
     const sleepMins=Math.round((Number(h.sleep||0)-sleepHours)*60);
     const sleepPct=Math.min(100,Math.round((Number(h.sleep||0)/8)*100));
+    const initials=String(profileName||activeProfile).trim().split(/\s+/).map(part=>part[0]||"").join("").slice(0,2).toUpperCase() || "IL";
     const mealMarkup = meals.length ? meals.slice().reverse().map(meal=>`
       <div class="profile-meal-row">
         <div><strong>${meal.food}</strong><span>${meal.calories} KCAL</span></div>
@@ -2312,9 +2310,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <button class="profile-avatar profile-avatar-edit" onclick="triggerProfileAvatarUpload()"><img src="${avatarSrc}" alt="Profile"><span class="material-symbols-outlined">photo_camera</span></button>
         <div class="profile-hero-copy">
           <h3>${String(profileName).toUpperCase()}</h3>
-          <div class="profile-hero-meta"><span class="material-symbols-outlined">verified</span><span>ELITE MEMBER</span></div>
+          <div class="profile-hero-meta"><span class="material-symbols-outlined">verified</span><span>TRAINING PROFILE</span></div>
+          <div class="profile-hero-stats">
+            <span>${p.height||"--"} CM</span>
+            <span>${waterTargetGlasses} WATER GOAL</span>
+            <span>${proteinTarget}G PROTEIN</span>
+          </div>
         </div>
-        <div class="profile-pro-badge">PRO</div>
+        <div class="profile-pro-badge">${initials}</div>
       </section>
       <section class="profile-metric-card">
         <div class="profile-metric-head">
@@ -2324,10 +2327,25 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           </div>
           <div class="profile-spark"><span></span><span></span><span></span><span></span><span></span></div>
         </div>
+        <div class="profile-highlight-grid">
+          <div class="profile-highlight-card">
+            <span>Protein Goal</span>
+            <strong>${h.protein||0}<em> / ${proteinTarget}G</em></strong>
+          </div>
+          <div class="profile-highlight-card">
+            <span>Hydration</span>
+            <strong>${h.water.toFixed(1)}<em> / ${adjustedWaterTarget.toFixed(1)}L</em></strong>
+          </div>
+        </div>
         <button class="profile-primary-btn" onclick="logTodayWeightPrompt()">LOG TODAY'S WEIGHT</button>
       </section>
       <section class="profile-section">
-        <h3>DAILY OPTIMIZATION</h3>
+        <div class="profile-section-head">
+          <div>
+            <span class="profile-label">Daily Inputs</span>
+            <h3>Daily Optimization</h3>
+          </div>
+        </div>
         <div class="profile-habit-card">
           <div class="profile-habit-icon water"><span class="material-symbols-outlined">water_drop</span></div>
           <div class="profile-habit-copy"><strong>Water Intake</strong><span>${waterGlasses} / ${waterTargetGlasses} GLASSES</span></div>
@@ -2374,10 +2392,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       </section>
       <section class="profile-links-card">
         <button onclick="openSettings()"><span class="material-symbols-outlined">settings</span><span>ACCOUNT SETTINGS</span><span class="material-symbols-outlined chev">chevron_right</span></button>
-        <button onclick="openSettings()"><span class="material-symbols-outlined">card_membership</span><span>SUBSCRIPTION</span><span class="material-symbols-outlined chev">chevron_right</span></button>
+        <button onclick="openSettings()"><span class="material-symbols-outlined">event_available</span><span>WORKOUT SCHEDULE</span><span class="material-symbols-outlined chev">chevron_right</span></button>
         <button onclick="openSettings()"><span class="material-symbols-outlined">help_center</span><span>SUPPORT</span><span class="material-symbols-outlined chev">chevron_right</span></button>
       </section>
-      <button class="profile-signout" onclick="signOutAccount()">SIGN OUT OF IRON LOG</button>
+      <section class="profile-links-card">
+        <button onclick="signOutAccount()"><span class="material-symbols-outlined">logout</span><span>SIGN OUT OF IRON LOG</span><span class="material-symbols-outlined chev">chevron_right</span></button>
+      </section>
     `;
   }
   function getProfileAvatarSrc(profileKey=activeProfile){
@@ -3732,7 +3752,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       sortedDayKeys().forEach(key=>{
         const workout = WORKOUT_PLAN[key];
         if(!workout?.participants?.includes(activeProfile)) return;
-        if(workout.weekday !== weekday) return;
+        if(getWorkoutWeekdaySortValue(workout) !== getWorkoutWeekdaySortValue({weekday})) return;
         planned++;
         if(sessionHasActivityForParticipant(state.workouts?.[dateStr]?.[key], key, activeProfile)) completed++;
       });
@@ -3769,17 +3789,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(!confirm(`Delete ${dayTitle} from ${formatDate(ds)}?`)) return;
     delete state.workouts[ds][key];
     if(Object.keys(state.workouts[ds]).length===0) delete state.workouts[ds];
+    Object.keys(state.prs || {}).forEach(prKey=>{
+      const pr = state.prs?.[prKey];
+      if(pr?.date === ds && pr?.dayKey === key) delete state.prs[prKey];
+    });
     if(activeDay===key && activeDate===ds){
       activeDay = null;
       const panel = document.getElementById("day-panel");
       if(panel) panel.style.display = "none";
     }
-    renderCalendar();
-    renderStats();
-    renderCharts();
-    renderHistorySelectedSession(ds);
-    renderHistoryMonthSummary(ds);
     await saveData();
+    renderDayGrid();
+    renderAll();
+    selectDate(ds);
   };
 
   // ─── ACTIONS ───
@@ -3916,7 +3938,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     keys.forEach((dayKey, index)=>{
       if(!WORKOUT_PLAN[dayKey]) return;
       WORKOUT_PLAN[dayKey].order = index + 1;
-      WORKOUT_PLAN[dayKey].label = `DAY ${index + 1}`;
+      if(!String(WORKOUT_PLAN[dayKey].label || "").trim()) WORKOUT_PLAN[dayKey].label = `DAY ${index + 1}`;
     });
     renderDayGrid();
     if(activeDay) renderDayPanel(activeDay);
@@ -4156,29 +4178,39 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.openEdit=function(key){
     const day=WORKOUT_PLAN[key];
     renderExerciseOptions();
-    document.getElementById("emit").textContent=`EDIT ${day.label} — ${day.title}`;
+    document.getElementById("emit").textContent=`EDIT ${getWorkoutDisplayLabel(key)} — ${day.title}`;
     document.getElementById("emit").style.color=day.color;
-    let h=`<div style="margin-bottom:16px;display:flex;gap:12px;flex-direction:column;padding-bottom:12px;border-bottom:1px solid var(--border)">
-      <div><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">WORKOUT TITLE</label><input id="edit-title-input" type="text" value="${day.title}" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:'Barlow Condensed';font-size:1rem"></div>
-      <div><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">SUBTITLE / MUSCLE GROUPS</label><input id="edit-subtitle-input" type="text" value="${day.subtitle}" style="width:100%;padding:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:0.9rem"></div>
-      <div><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">SCHEDULED WEEKDAY</label>
+    let h=`<div class="editor-shell">
+      <section class="editor-section">
+        <div class="editor-grid">
+          <label class="editor-field"><span>DAY LABEL</span><input id="edit-label-input" class="fi" type="text" value="${getWorkoutDisplayLabel(key)}" placeholder="e.g. Day 2"></label>
+          <label class="editor-field"><span>WORKOUT TITLE</span><input id="edit-title-input" class="fi" type="text" value="${day.title}" placeholder="e.g. Push"></label>
+          <label class="editor-field editor-field-wide"><span>SUBTITLE / MUSCLE GROUPS</span><input id="edit-subtitle-input" class="fi" type="text" value="${day.subtitle}" placeholder="e.g. Chest · Shoulders · Triceps"></label>
+          <label class="editor-field"><span>SCHEDULED WEEKDAY</span>
         <select id="edit-weekday-input" class="fsel">
           <option value="-1" ${day.weekday==null?'selected':''}>— No fixed day —</option>
           <option value="1" ${day.weekday===1?'selected':''}>Monday</option><option value="2" ${day.weekday===2?'selected':''}>Tuesday</option><option value="3" ${day.weekday===3?'selected':''}>Wednesday</option>
           <option value="4" ${day.weekday===4?'selected':''}>Thursday</option><option value="5" ${day.weekday===5?'selected':''}>Friday</option><option value="6" ${day.weekday===6?'selected':''}>Saturday</option><option value="0" ${day.weekday===0?'selected':''}>Sunday</option>
         </select>
-      </div>
-    </div><div id="eel">`;
+          </label>
+        </div>
+      </section>
+      <section class="editor-section">
+        <div class="editor-section-head">
+          <strong>Exercises</strong>
+          <span>Drag to reorder. The workout list now follows weekday order automatically.</span>
+        </div>
+        <div id="eel" class="editor-exercise-list">`;
     day.exercises.forEach((ex,i)=>{
       h+=createEditRowMarkup(ex, i);
     });
-    h+=`</div><button class="eab" onclick="addEditRow()" style="border-color:${day.color};color:${day.color}">+ ADD EXERCISE</button>`;
+    h+=`</div><button class="eab" onclick="addEditRow()" style="border-color:${day.color};color:${day.color}">+ ADD EXERCISE</button></section>`;
     if(canManageWorkoutParticipants()){
-      h+=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:8px">PARTICIPANTS</label><label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:8px"><input type="checkbox" id="edit-participants-bronwen" ${day.participants?.includes('bronwen')?'checked':''} style="cursor:pointer"><span>Bronwen also does this workout (shows split tracking)</span></label></div>`;
+      h+=`<section class="editor-section"><div class="editor-section-head"><strong>Participants</strong></div><label class="editor-check"><input type="checkbox" id="edit-participants-bronwen" ${day.participants?.includes('bronwen')?'checked':''}><span>Bronwen also does this workout</span></label></section>`;
     } else {
-      h+=`<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)"><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:8px">PARTICIPANTS</label><div style="color:var(--muted);font-size:.82rem">Only Revan can change workout participants.</div></div>`;
+      h+=`<section class="editor-section"><div class="editor-section-head"><strong>Participants</strong><span>Only Revan can change workout participants.</span></div></section>`;
     }
-    h+=`<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)"><label style="display:block;color:var(--muted);font-size:.8rem;margin-bottom:4px">WORKOUT NOTES (OPTIONAL)</label><textarea id="edit-notes-input" placeholder="Add notes about this workout..." style="width:100%;height:80px;padding:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:inherit;resize:vertical">${day.notes||''}</textarea></div>`;
+    h+=`<section class="editor-section"><label class="editor-field editor-field-wide"><span>WORKOUT NOTES</span><textarea id="edit-notes-input" class="fi editor-notes" placeholder="Add notes about this workout...">${day.notes||''}</textarea></label></section></div>`;
     document.getElementById("emb").innerHTML=h;
     document.getElementById("em").style.display="flex";
     document.getElementById("em").dataset.key=key;
@@ -4246,12 +4278,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   };
   window.saveEdit=async function(){
     const key=document.getElementById("em").dataset.key;
+    const newLabel=document.getElementById("edit-label-input").value.trim();
     const newTitle=document.getElementById("edit-title-input").value.trim();
     const newSubtitle=document.getElementById("edit-subtitle-input").value.trim();
     const newNotes=document.getElementById("edit-notes-input").value.trim();
     const newWeekday=parseInt(document.getElementById("edit-weekday-input")?.value??"-1",10);
     const hasBronwen=canManageWorkoutParticipants() ? !!document.getElementById("edit-participants-bronwen")?.checked : (WORKOUT_PLAN[key].participants||[]).includes("bronwen");
     if(!newTitle){toast("⚠️ Enter a title");return;}
+    WORKOUT_PLAN[key].label=newLabel || getWorkoutDisplayLabel(key);
     WORKOUT_PLAN[key].title=newTitle;
     WORKOUT_PLAN[key].subtitle=newSubtitle;
     WORKOUT_PLAN[key].notes=newNotes||"";
@@ -4269,9 +4303,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   // ─── SAVE WORKOUT LIBRARY ───
   window.openSave=function(key){
     const day=WORKOUT_PLAN[key], saved=state.savedWorkouts||{}, sk=Object.keys(saved);
-    let h=`<p style="color:var(--muted);font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em;font-size:.85rem;margin-bottom:12px">SAVE "${day.title}" TO LIBRARY (max 10)</p>`;
-    if(sk.length>0){ h+=`<p style="color:var(--muted);font-size:.75rem;margin-bottom:8px;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em">REPLACE EXISTING:</p>`; sk.forEach(k=>{ h+=`<button onclick="confirmSave('${key}','${k}')" style="display:block;width:100%;text-align:left;background:var(--bg3);border:1px solid var(--border);color:var(--text);padding:8px 10px;margin-bottom:6px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em">↩ REPLACE: ${saved[k].title}</button>`; }); }
-    if(sk.length<10) h+=`<button onclick="confirmSave('${key}',null)" style="display:block;width:100%;text-align:left;background:rgba(92,186,92,.1);border:1px solid rgba(92,186,92,.3);color:#b7f3b7;padding:8px 10px;margin-top:8px;cursor:pointer;font-family:'Barlow Condensed',sans-serif;letter-spacing:.1em">+ SAVE AS NEW</button>`;
+    let h=`<div class="save-workout-shell"><div class="save-workout-copy">Save <strong>${day.title}</strong> to your workout library. Choose a slot to replace or create a fresh entry.</div>`;
+    if(sk.length){
+      h+=`<div class="save-workout-grid">`;
+      sk.forEach(k=>{
+        h+=`<button class="save-workout-option" onclick="confirmSave('${key}','${k}')"><span>Replace</span><strong>${saved[k].title}</strong></button>`;
+      });
+      h+=`</div>`;
+    }
+    if(sk.length<10) h+=`<button class="save-workout-new" onclick="confirmSave('${key}',null)">+ SAVE AS NEW</button>`;
+    h+=`</div>`;
     document.getElementById("svmb").innerHTML=h;
     document.getElementById("svm").style.display="flex"; closeCardMenu();
   };
@@ -4317,6 +4358,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   const COLORS=["#e85d04","#4361ee","#7b2d8b","#2ec4b6","#f72585","#f0c040","#5cba5c","#e040fb"];
   window.openAddDay=function(){
     if(Object.keys(WORKOUT_PLAN).length>=MAX_DAYS){toast("🛑 Max 10 days");return;}
+    const nextOrder = sortedDayKeys().length + 1;
+    if(document.getElementById("adlbi")) document.getElementById("adlbi").value=`DAY ${nextOrder}`;
     document.getElementById("adi").value=""; document.getElementById("adsi").value=""; document.getElementById("adws").value="-1";
     const tplSel=document.getElementById("adtemplate");
     if(tplSel){
@@ -4352,6 +4395,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(Object.keys(WORKOUT_PLAN).length>=MAX_DAYS){toast("🛑 Max 10 days");return;}
     const templateKey=document.getElementById("adtemplate")?.value||"";
     const template=(state.savedWorkouts||{})[templateKey]||null;
+    let label=document.getElementById("adlbi")?.value.trim()||"";
     let title=document.getElementById("adi").value.trim().toUpperCase();
     const sub=document.getElementById("adsi").value.trim();
     const wd=parseInt(document.getElementById("adws").value);
@@ -4362,7 +4406,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const next=nums.length?Math.max(...nums)+1:1;
     const key=`day${next}`;
     const prefilledExercises=template?.exercises?deepCopy(template.exercises):[];
-    WORKOUT_PLAN[key]={label:`DAY ${next}`,order:next,weekday:wd>=0?wd:null,title,subtitle:sub||template?.subtitle||title,color:col,exercises:prefilledExercises,participants:['revan']};
+    if(!label) label=`DAY ${next}`;
+    WORKOUT_PLAN[key]={label,order:next,weekday:wd>=0?wd:null,title,subtitle:sub||template?.subtitle||title,color:col,exercises:prefilledExercises,participants:['revan']};
     normalizeWorkoutPlanOrder();
     closeAddDay(); renderDayGrid(); renderAll(); await saveData();
     if(prefilledExercises.length){
@@ -4727,7 +4772,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       </div>` + (items.length?items.map(k=>{
         const d=WORKOUT_PLAN[k];
         const index = items.indexOf(k);
-        return `<div class="template-item"><span class="template-name">${d.label} · ${d.title}</span><div class="template-btns"><button class="template-btn-load" ${index===0?'disabled':''} onclick="moveWorkoutDay('${k}',-1)">UP</button><button class="template-btn-load" ${index===items.length-1?'disabled':''} onclick="moveWorkoutDay('${k}',1)">DOWN</button><button class="template-btn-load" onclick="closeSettings();setTimeout(()=>openEdit('${k}'),60)">EDIT</button><button class="template-btn-del" onclick="deleteDay('${k}')">DELETE</button></div></div>`;
+        return `<div class="template-item"><span class="template-name">${getWorkoutDisplayLabel(k)} · ${d.title}<em>${getWorkoutWeekdayLabel(d.weekday)}</em></span><div class="template-btns"><button class="template-btn-load" ${index===0?'disabled':''} onclick="moveWorkoutDay('${k}',-1)">UP</button><button class="template-btn-load" ${index===items.length-1?'disabled':''} onclick="moveWorkoutDay('${k}',1)">DOWN</button><button class="template-btn-load" onclick="closeSettings();setTimeout(()=>openEdit('${k}'),60)">EDIT</button><button class="template-btn-del" onclick="deleteDay('${k}')">DELETE</button></div></div>`;
       }).join(''):`<div style="color:var(--muted);font-size:.8rem;padding:10px">No workouts found yet.</div>`);
       return;
     }
@@ -5199,7 +5244,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const countEl=document.getElementById("workout-count-label");
     if(countEl) countEl.textContent = String(sortedDayKeys().length).padStart(2,"0");
     const tdk=getTodayDayKey();
-    const dn=["SUN","MON","TUE","WED","THU","FRI","SAT"];
     const keys = sortedDayKeys().filter(key=>{
       if(!workoutSearchQuery) return true;
       const day = WORKOUT_PLAN[key];
@@ -5220,7 +5264,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       card.innerHTML=`<div class="day-card-shell">
         <div class="day-card-top">
           <div>
-            <div class="cl" style="color:${day.color||"#888"}">${day.label||key} · ${day.weekday!=null?(dn[day.weekday]??'—'):'—'}</div>
+            <div class="cl" style="color:${day.color||"#888"}">${getWorkoutDisplayLabel(key)} · ${getWorkoutWeekdayLabel(day.weekday)}</div>
             <div class="ct">${day.title||"WORKOUT"}</div>
             <div class="cs">${day.subtitle||""}</div>
           </div>
