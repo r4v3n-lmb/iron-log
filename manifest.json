@@ -1,23 +1,29 @@
 {
   "name": "Iron Log",
-  "short_name": "IronLog",
-  "description": "Weightlifting tracker",
+  "short_name": "Iron Log",
+  "description": "Strength training tracker with routines, progress, recovery tracking, and installable PWA support.",
   "start_url": "./ironlog.html",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#111111",
   "theme_color": "#111111",
-  "orientation": "any",
+  "orientation": "portrait-primary",
   "icons": [
     {
-      "src": "iron_log_logo.png",
+      "src": "./icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "iron_log_logo.png",
+      "src": "./icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
-  ]
+  ],
+  "categories": ["health", "fitness", "sports"],
+  "lang": "en",
+  "dir": "ltr"
 }
