@@ -86,9 +86,9 @@
 
 <!-- HEADER -->
 <div class="hdr">
-  <div class="logo"><span class="logo-brand"><img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">IRON<span class="logo-log">LOG</span></span></div>
+  <div class="logo"><span class="logo-brand"><span class="material-symbols-outlined logo-symbol">fitness_center</span>IRON<span class="logo-log">LOG</span></span></div>
   <div class="hdr-right">
-    <div id="header-datetime"></div>
+    <button class="hdr-icn-btn" onclick="toggleNotifications()" aria-label="Notifications"><span class="material-symbols-outlined">notifications</span></button>
   </div>
 </div>
 <div id="coverWorkoutPlayer">
@@ -143,24 +143,24 @@
       <div class="dash-hero-glow"></div>
     </section>
 
-    <section id="dashboard-consistency" class="dashboard-card"></section>
+    <section id="dashboard-consistency" class="dashboard-card dashboard-consistency-card"></section>
 
-    <section class="dashboard-metric-grid">
-      <button class="stat" onclick="focusStat('days')" title="Jump to calendar"><div class="stat-icon material-symbols-outlined">calendar_month</div><div class="sn" id="dashboard-workouts">00</div><div class="sl">WORKOUTS / MONTH</div></button>
-      <button class="stat" onclick="focusStat('tonnage')" title="Open progress"><div class="stat-icon material-symbols-outlined">speed</div><div class="sn" id="stat-tonnage">0</div><div class="sl">TOTAL KG MOVED</div></button>
+    <section class="dashboard-metric-grid dashboard-bento-grid">
+      <button class="stat dashboard-bento-card" onclick="focusStat('days')" title="Jump to calendar"><div class="stat-icon material-symbols-outlined">calendar_month</div><div class="sn" id="dashboard-workouts">00</div><div class="sl">WORKOUTS / MONTH</div></button>
+      <button class="stat dashboard-bento-card" onclick="focusStat('tonnage')" title="Open progress"><div class="stat-icon material-symbols-outlined">speed</div><div class="sn" id="stat-tonnage">0</div><div class="sl">TOTAL KG MOVED</div></button>
     </section>
     <div id="stat-days" style="display:none">0</div>
     <div id="stat-ex" style="display:none">0</div>
     <div id="stat-consistency" style="display:none">0</div>
 
-    <section class="qbar">
+    <section class="qbar dashboard-cta-wrap">
       <button class="dashboard-primary-cta" onclick="openTodayWorkout()"><span class="material-symbols-outlined">add</span><span>Start Workout</span></button>
       <button id="install-app-btn" class="dashboard-secondary-cta" style="display:none" onclick="installPwaApp()">Install App</button>
     </section>
 
-    <section class="dashboard-feed">
+    <section class="dashboard-feed dashboard-activity-feed">
       <div class="dashboard-section-head">
-        <h3>Recent Workouts</h3>
+        <h3>Recent Activity</h3>
         <button onclick="navTo('progress')">See All</button>
       </div>
       <div id="dashboard-activity-list"></div>

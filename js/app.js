@@ -12,7 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.37";
+  const APP_VERSION = "v1.1.38";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -905,6 +905,43 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       markPendingSync(activeProfile);
       toast(navigator.onLine ? "⚠️ Save failed" : "⚠️ Offline: changes stored on this device and will sync later");
     }
+  }
+  async function deleteRemoteWorkoutEntry(ds, key, prKeys=[]){
+    const ref = doc(db, "ironlog", SHARED_DOC);
+    const payload = {};
+    if(state.workouts?.[ds]){
+      payload[`workouts.${ds}.${key}`] = deleteField();
+      payload[`profileData.${activeProfile}.workouts.${ds}.${key}`] = deleteField();
+    } else {
+      payload[`workouts.${ds}`] = deleteField();
+      payload[`profileData.${activeProfile}.workouts.${ds}`] = deleteField();
+    }
+    prKeys.forEach(prKey=>{
+      payload[`prs.${prKey}`] = deleteField();
+      payload[`profileData.${activeProfile}.prs.${prKey}`] = deleteField();
+    });
+    await setDoc(ref, payload, { merge: true });
+  }
+  async function deleteRemoteWorkoutDay(key, removedDates=[], prKeys=[]){
+    const ref = doc(db, "ironlog", SHARED_DOC);
+    const payload = {
+      [`plan.${key}`]: deleteField(),
+      [`profileData.${activeProfile}.plan.${key}`]: deleteField()
+    };
+    removedDates.forEach(ds=>{
+      if(state.workouts?.[ds]){
+        payload[`workouts.${ds}.${key}`] = deleteField();
+        payload[`profileData.${activeProfile}.workouts.${ds}.${key}`] = deleteField();
+      } else {
+        payload[`workouts.${ds}`] = deleteField();
+        payload[`profileData.${activeProfile}.workouts.${ds}`] = deleteField();
+      }
+    });
+    prKeys.forEach(prKey=>{
+      payload[`prs.${prKey}`] = deleteField();
+      payload[`profileData.${activeProfile}.prs.${prKey}`] = deleteField();
+    });
+    await setDoc(ref, payload, { merge: true });
   }
 
   window.switchProfile=function(pk){
@@ -2040,7 +2077,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       tonnage: entry.tonnage,
       checkedCount: entry.exercises,
       duration: entry.durationMins,
-      exerciseLines: entry.exerciseLines
+      exerciseLines: entry.exerciseLines,
+      prCount: entry.prCount
     }));
   }
   function getVisibleActivityFallback(limit=3){
@@ -2136,7 +2174,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const today = new Date(getTodayStr()+"T12:00:00");
       const monday = new Date(today);
       monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-      const labels = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+      const labels = ["M","T","W","T","F","S","S"];
       const days = [];
       for(let i=0;i<7;i++){
         const d = new Date(monday);
@@ -2148,7 +2186,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const pct = Math.round((days.filter(x=>x.worked).length / days.length) * 100);
       consistencyEl.innerHTML = `
         <div class="dashboard-card-head dashboard-card-head-tight">
-          <h3>WEEKLY TRACKER</h3>
+          <h3>WEEKLY CONSISTENCY</h3>
           <span>${pct}%</span>
         </div>
         <div class="consistency-bars">
@@ -2174,7 +2212,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
                 <span class="activity-title">${item.title}</span>
                 <span class="activity-meta">${new Date(item.date+"T12:00:00").toLocaleDateString("en-ZA",{weekday:"short", day:"numeric", month:"short"})}</span>
               </span>
-              <span class="activity-tag">View</span>
+              <span class="activity-tag"><span class="material-symbols-outlined">chevron_right</span></span>
             </button>
           `).join("");
         }
@@ -2186,7 +2224,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         const daysAgo = Math.max(0, Math.floor((new Date(getTodayStr()+"T12:00:00") - metaDate)/(1000*60*60*24)));
         const when = daysAgo === 0 ? "Today" : daysAgo === 1 ? "Yesterday" : `${daysAgo} days ago`;
         const meta = `${when}${item.duration>0 ? ` • ${item.duration} mins` : ""}${item.tonnage>0 ? ` • ${item.tonnage.toLocaleString()} kg moved` : ""}`;
-        const sessionMeta = item.exerciseLines?.[0]?.meta || (item.wo?.sessionMeta?.rpe ? `RPE ${item.wo.sessionMeta.rpe}` : item.checkedCount > 0 ? `+${item.checkedCount} logged` : `${(item.day.exercises || []).length} exercises`);
+        const sessionMeta = item.prCount > 0
+          ? `+${item.prCount} PR${item.prCount===1?"":"s"}`
+          : `<span class="material-symbols-outlined">chevron_right</span>`;
         return `
           <button class="activity-card" onclick="openWorkoutFromHistory('${item.date}','${item.key}')">
             <span class="activity-icon material-symbols-outlined">${icon}</span>
@@ -2220,7 +2260,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     let t=0; const p=getMonthKey();
     Object.keys(state.workouts||{}).forEach(d=>{ if(!d.startsWith(p))return; Object.keys(state.workouts[d]).forEach(k=>t+=calcSessionTonnage(d,k)); });
     const el=document.getElementById("stat-tonnage");
-    if(el)el.textContent=t>=1000?(t/1000).toFixed(1)+"t":t+"kg";
+    if(el)el.textContent=t>=1000?`${Math.round(t/1000)}K`:String(t);
     const workoutsMonth = document.getElementById("dashboard-workouts");
     const progressFrequency = document.getElementById("progress-frequency");
     const progressPrs = document.getElementById("progress-pr-count");
@@ -3949,18 +3989,20 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(!state.workouts?.[ds]?.[key]) return;
     const dayTitle = WORKOUT_PLAN[key]?.title || key;
     if(!confirm(`Delete ${dayTitle} from ${formatDate(ds)}?`)) return;
+    const removedPrKeys = Object.keys(state.prs || {}).filter(prKey=>{
+      const pr = state.prs?.[prKey];
+      return pr?.date === ds && pr?.dayKey === key;
+    });
     delete state.workouts[ds][key];
     if(Object.keys(state.workouts[ds]).length===0) delete state.workouts[ds];
-    Object.keys(state.prs || {}).forEach(prKey=>{
-      const pr = state.prs?.[prKey];
-      if(pr?.date === ds && pr?.dayKey === key) delete state.prs[prKey];
-    });
+    removedPrKeys.forEach(prKey=>{ delete state.prs[prKey]; });
     if(activeDay===key && activeDate===ds){
       activeDay = null;
       const panel = document.getElementById("day-panel");
       if(panel) panel.style.display = "none";
     }
     await saveData();
+    await deleteRemoteWorkoutEntry(ds, key, removedPrKeys);
     renderDayGrid();
     renderAll();
     selectDate(ds);
@@ -4528,16 +4570,17 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.deleteDay=async function(key){
     const day=WORKOUT_PLAN[key]; if(!day)return;
     if(!confirm(`Delete "${day.title}" from your plan and remove your logged entries for this day?`))return;
+    const removedDates = [];
     Object.keys(state.workouts||{}).forEach(ds=>{
       if(!state.workouts?.[ds]?.[key]) return;
+      removedDates.push(ds);
       delete state.workouts[ds][key];
       if(Object.keys(state.workouts[ds]).length===0) delete state.workouts[ds];
     });
-    Object.keys(state.prs||{}).forEach(prKey=>{
-      if(state.prs?.[prKey]?.dayKey===key) delete state.prs[prKey];
-    });
+    const removedPrKeys = Object.keys(state.prs||{}).filter(prKey=>state.prs?.[prKey]?.dayKey===key);
+    removedPrKeys.forEach(prKey=>{ delete state.prs[prKey]; });
     delete WORKOUT_PLAN[key]; normalizeWorkoutPlanOrder(); if(activeDay===key){activeDay=null;document.getElementById("day-panel").style.display="none";}
-    closeCardMenu(); renderDayGrid(); renderAll(); await saveData(); toast(`🗑 ${day.title} deleted`);
+    closeCardMenu(); renderDayGrid(); renderAll(); await saveData(); await deleteRemoteWorkoutDay(key, removedDates, removedPrKeys); toast(`🗑 ${day.title} deleted`);
   };
 
   // ─── ADD DAY ───
