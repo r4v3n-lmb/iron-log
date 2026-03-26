@@ -56,6 +56,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   let latestAppUpdatedAt = "";
   let lastUpdateToastVersion = "";
   let mobileSection = "dashboard";
+  let activeWorkoutLocked = false;
+  let activeWorkoutLockKey = null;
   let workoutSearchQuery = "";
   let activeWorkoutParticipantIndex = 0;
   let deferredInstallPrompt = null;
@@ -95,7 +97,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function isAdminUser(){ return activeProfile==="revan"; }
   const FIRESTORE_SPARK_LIMIT_BYTES = 1024 * 1024 * 1024;
   const isMobile = ()=>window.innerWidth <= 600;
-  const isCoverScreen = ()=>window.innerWidth <= 420 && window.innerHeight <= 900;
+  // The dedicated active-workout screen now handles all mobile sizes.
+  const isCoverScreen = ()=>false;
 
   const ACCOUNTS_DOC = "accounts";
   function getSnapshotStorageKey(profileKey=activeProfile){ return `ironlog_pwa_snapshot_${profileKey}`; }
@@ -214,7 +217,37 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   async function registerServiceWorker(){
     if(!("serviceWorker" in navigator)) return;
     try{
-      await navigator.serviceWorker.register("./service-worker.js");
+      let controllerRefreshPending = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if(controllerRefreshPending) return;
+        controllerRefreshPending = true;
+        window.location.reload();
+      });
+      const registration = await navigator.serviceWorker.register(`./service-worker.js?v=${encodeURIComponent(APP_VERSION)}`, {
+        updateViaCache: "none"
+      });
+      const activateWaitingWorker = worker => {
+        if(worker) worker.postMessage({ type: "SKIP_WAITING" });
+      };
+      if(registration.waiting) activateWaitingWorker(registration.waiting);
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        if(!worker) return;
+        worker.addEventListener("statechange", () => {
+          if(worker.state === "installed" && navigator.serviceWorker.controller){
+            activateWaitingWorker(worker);
+          }
+        });
+      });
+      try{ await registration.update(); }catch(_e){}
+      document.addEventListener("visibilitychange", () => {
+        if(document.visibilityState === "visible"){
+          registration.update().catch(() => {});
+        }
+      });
+      window.setInterval(() => {
+        registration.update().catch(() => {});
+      }, 5 * 60 * 1000);
     }catch(e){
       console.warn("[IronLog PWA] Service worker registration failed", e);
     }
@@ -444,6 +477,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     activeWorkoutParticipantIndex=(activeWorkoutParticipantIndex + dir + participants.length) % participants.length;
     renderDayPanel(key);
   };
+  window.setActiveWorkoutParticipant=function(key, participant){
+    const day=WORKOUT_PLAN[key];
+    if(!day) return;
+    const wo=getWorkout(activeDate,key);
+    const participants=(getSessionParticipants(activeDate,key) || wo.sessionParticipants || day.participants || [activeProfile]).filter(Boolean);
+    const index=participants.indexOf(participant);
+    if(index<0) return;
+    activeWorkoutParticipantIndex=index;
+    renderDayPanel(key);
+  };
 
   // SESSION TIMER
   let sessionInterval=null, sessionStart=null, sessionPaused=false, sessionPausedAt=0;
@@ -534,6 +577,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function getTodayDayKey(){
     const dow=new Date().getDay();
     return Object.keys(WORKOUT_PLAN).find(k=>getWorkoutWeekdaySortValue(WORKOUT_PLAN[k])===getWorkoutWeekdaySortValue({weekday:dow}))||null;
+  }
+  function getQuickStartWorkoutKey(){
+    const todayKey = getTodayDayKey();
+    if(todayKey && WORKOUT_PLAN[todayKey]) return todayKey;
+    if(activeDay && WORKOUT_PLAN[activeDay]) return activeDay;
+    return sortedDayKeys().find(key=>!!WORKOUT_PLAN[key]) || null;
   }
   function getProfileDocId(){ return PROFILES[activeProfile].docId; }
   function getWorkoutOrderValue(key){
@@ -1095,12 +1144,18 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(el && p) el.style.color=p.color;
   }
   window.openTodayWorkout=async function(){
-    const todayKey=getTodayDayKey();
-    if(!todayKey){
-      toast("No workout planned for today");
+    const workoutKey=getQuickStartWorkoutKey();
+    if(!workoutKey){
+      navTo("workouts");
+      toast("Add a workout day first");
       return;
     }
-    await startWorkout(todayKey);
+    if(workoutKey !== getTodayDayKey()){
+      const title = WORKOUT_PLAN[workoutKey]?.title || "workout";
+      toast(`Opening ${title}`);
+    }
+    setMobileSection("workouts");
+    await startWorkout(workoutKey);
     window.scrollTo({top:0,behavior:"smooth"});
   };
   window.openAddWorkoutQuick=function(){
@@ -1185,6 +1240,25 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function syncWorkoutFocusState(){
     document.body.classList.toggle("exercise-focus", Boolean(activeDay) && isMobile() && !isCoverScreen());
   }
+  function isActiveWorkoutMode(){
+    return activeWorkoutLocked && !!activeWorkoutLockKey;
+  }
+  function syncActiveWorkoutMode(){
+    if(isActiveWorkoutMode()) document.body.setAttribute("data-active-workout", "active");
+    else document.body.removeAttribute("data-active-workout");
+    syncWorkoutFocusState();
+    syncBottomNavState();
+  }
+  function enterActiveWorkoutMode(key){
+    activeWorkoutLocked = true;
+    activeWorkoutLockKey = key;
+    syncActiveWorkoutMode();
+  }
+  function exitActiveWorkoutMode(){
+    activeWorkoutLocked = false;
+    activeWorkoutLockKey = null;
+    syncActiveWorkoutMode();
+  }
 
   function setMobileSection(section){
     const normalized = section === "home" ? "dashboard" : (section === "start" ? "workouts" : (section || "dashboard"));
@@ -1196,7 +1270,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   function syncBottomNavState(){
     document.querySelectorAll(".bnav-item").forEach(btn=>{
-      btn.classList.toggle("active", btn.dataset.section === mobileSection);
+      const activeSection = isActiveWorkoutMode() ? "workouts" : mobileSection;
+      btn.classList.toggle("active", btn.dataset.section === activeSection);
     });
   }
 
@@ -1468,6 +1543,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   }
 
   window.navTo=function(section, btn){
+    if(isActiveWorkoutMode()){
+      toast("Finish or close the active workout first");
+      return;
+    }
     if(section === "settings"){
       setMobileSection("profile");
       openSettings();
@@ -2347,7 +2426,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           `).join("")}
         </div>
       `;
-      const weekEntries = days.flatMap(day=>day.entries.map(entry=>({ ...entry, date: day.date }))).slice(0, 3);
+      const weekEntries = days
+        .flatMap(day=>day.entries.map(entry=>({ ...entry, date: day.date })))
+        .sort((a,b)=>{
+          if(a.date === b.date){
+            return String(a.wo?.updatedAt || "").localeCompare(String(b.wo?.updatedAt || ""));
+          }
+          return a.date.localeCompare(b.date);
+        })
+        .slice(-3);
       const activityMarkup = ()=>{
         if(!weekEntries.length){
           return `<div class="activity-empty">No workouts logged this week yet. Complete a session and it will appear here immediately.</div>`;
@@ -2455,7 +2542,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const td=getMonthTonnage();
     const tL=td.map(x=>x.label),tV=td.map(x=>x.tonnage),tC=td.map(x=>WORKOUT_PLAN[x.dayKey]?.color||ac);
     if(tonnageChart){tonnageChart.data.labels=tL;tonnageChart.data.datasets[0].data=tV;tonnageChart.data.datasets[0].backgroundColor=tC;tonnageChart.update();}
-    else tonnageChart=new Chart(document.getElementById("tonnageChart"),{type:"bar",data:{labels:tL,datasets:[{label:"Tonnage (kg)",data:tV,backgroundColor:tC,borderRadius:6}]},options:{...gopt,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true,barRotate:-90}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}}});
+    else tonnageChart=new Chart(document.getElementById("tonnageChart"),{type:"bar",data:{labels:tL,datasets:[{label:"Tonnage (kg)",data:tV,backgroundColor:tC,borderRadius:6}]},options:{...gopt,plugins:{legend:{display:false},ironlogValueLabels:{enabled:true,barInside:true}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:true}}}});
     const bw=getBwHistory();
     if(bwChart){bwChart.data.labels=bw.map(x=>x.label);bwChart.data.datasets[0].data=bw.map(x=>x.weight);bwChart.update();}
     else bwChart=new Chart(document.getElementById("bwChart"),{type:"line",data:{labels:bw.map(x=>x.label),datasets:[{label:"kg",data:bw.map(x=>x.weight),borderColor:"#f0c040",backgroundColor:"rgba(240,192,64,0.07)",borderWidth:2.5,pointBackgroundColor:"#f0c040",pointRadius:4,pointHoverRadius:6,tension:0.4,fill:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"#888",font:{family:"Barlow Condensed",size:11}},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"#888",font:{family:"Barlow Condensed"}},grid:{color:"rgba(255,255,255,0.04)"},beginAtZero:false}}}});
@@ -2472,12 +2559,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const fmt=d=>d.toISOString().split("T")[0];
     const monStr=fmt(lm),friStr=fmt(lf);
     let dc=0,tv=0,wt=[];
+    let targetSessions=0;
     const prsSet=new Set();
     for(let d=new Date(lm);d<=lf;d.setDate(d.getDate()+1)){
-      const ds=fmt(d),wd=state.workouts?.[ds]; if(!wd)continue;
+      const ds=fmt(d);
+      const plannedKeys=sortedDayKeys().filter(key=>Number(WORKOUT_PLAN[key]?.weekday)===d.getDay());
+      targetSessions+=plannedKeys.length;
+      const wd=state.workouts?.[ds]; if(!wd)continue;
       Object.keys(wd).forEach(k=>{
         const s=wd[k];
-        if(!s.done) return;
+        if(!s.done || (plannedKeys.length && !plannedKeys.includes(k))) return;
         dc++; wt.push(k); tv+=calcSessionTonnage(ds,k);
       });
       Object.keys(state.prs||{}).forEach(prKey=>{
@@ -2490,13 +2581,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       });
     }
     const prs=Array.from(prsSet);
-    if(dc===0){el.style.display="none";return;}
+    if(dc===0 && targetSessions===0){el.style.display="none";return;}
     el.style.display="block";
     const dots=wt.map(k=>`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${WORKOUT_PLAN[k]?.color||'#888'};margin-right:3px"></span>${WORKOUT_PLAN[k]?.title||k}`).join(' ');
+    const targetLabel = targetSessions>0 ? `${dc}/${targetSessions}` : String(dc);
     el.innerHTML=`<div class="ws-inner">
       <div class="ws-head"><span class="ws-title">// WEEK RECAP</span><span class="ws-range">${monStr} → ${friStr}</span></div>
       <div class="ws-stats">
-        <div class="ws-stat"><div class="ws-n" style="color:#5cba5c">${dc}/5</div><div class="ws-l">DAYS DONE</div></div>
+        <div class="ws-stat"><div class="ws-n" style="color:#5cba5c">${targetLabel}</div><div class="ws-l">WORKOUTS DONE</div></div>
         <div class="ws-stat"><div class="ws-n" style="color:#f0c040">${tv>=1000?(tv/1000).toFixed(1)+"t":tv+"kg"}</div><div class="ws-l">VOLUME</div></div>
         <div class="ws-stat"><div class="ws-n" style="color:#f72585">${prs.length}</div><div class="ws-l">NEW PRS</div></div>
       </div>
@@ -3300,71 +3392,113 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const loggedSets=Math.min(setHistory.length, targetSets);
       const setPct=Math.min(100, Math.round((loggedSets/targetSets)*100));
       const nextSetNumber=Math.min(loggedSets + 1, targetSets);
-      const ptime=getWorkoutTimeEntry(activeDate,key,pp);
       const pcolor=PROFILES[pp]?.color||'#888';
-      return `<section class="active-participant-card ${ed.checked?'complete':''}" style="--participant:${pcolor}">
-        <div class="active-participant-head">
-          <div><span class="active-participant-name">${PROFILES[pp]?.label||pp}</span><span class="active-participant-meta">${skipped?`Skipped${ed.skipReason?` · ${ed.skipReason}`:""}`:(ed.checked?'Exercise complete':`${loggedSets}/${targetSets} sets logged`)}</span></div>
-          <div class="active-participant-time">
-            <input type="time" class="active-inline-input" value="${ptime.at||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutTimeAt('${key}','${pp}',this.value)">
-            <input type="number" class="active-inline-input active-inline-input-sm" min="0" max="480" step="1" value="${ptime.durationMins||''}" ${!isEditable?'disabled':''} onblur="saveWorkoutDuration('${key}','${pp}',this.value)">
+      const progressTiles=Array.from({length:targetSets},(_item,index)=>`<div class="focus-session-step ${index<loggedSets?'done':''} ${index===loggedSets && !ed.checked && !skipped?'current':''}"><span>${index+1}</span></div>`).join("");
+      return `<section class="focus-logging-card ${ed.checked?'complete':''}" style="--participant:${pcolor}">
+        ${participants.length>1 ? `<div class="focus-participant-pill">${PROFILES[pp]?.label||pp}</div>` : ""}
+        <div class="focus-logging-top">
+          <div class="focus-stat-mini">
+            <span>Last</span>
+            <strong>${lastWeight?.weight || "—"} <em>kg</em></strong>
+          </div>
+          <div class="focus-stat-mini">
+            <span>Target</span>
+            <strong>${activeExercise.reps || "—"} <em>reps</em></strong>
+          </div>
+          <button class="focus-history-btn" type="button" onclick="showExerciseHistory('${activeExercise.name.replace(/'/g,"\\'")}')">
+            <span class="material-symbols-outlined">history</span>
+            <span>History</span>
+          </button>
+        </div>
+        <div class="focus-logging-inputs">
+          <div class="focus-input-block">
+            <label>Weight</label>
+            <div class="focus-input-shell">
+              <input class="focus-metric-input" type="number" inputmode="decimal" step="0.25" min="0" value="${currentWeight}" ${!isEditable?'disabled':''} onblur="commitActiveWorkoutValue('${key}','${exKey}','weight',this.value,'${currentWeight}')" onkeydown="if(event.key==='Enter'){this.blur();}">
+              <span>kg</span>
+            </div>
+          </div>
+          <div class="focus-input-block">
+            <label>Reps</label>
+            <div class="focus-input-shell">
+              <input class="focus-metric-input" type="number" inputmode="numeric" step="1" min="0" value="${currentReps}" ${!isEditable?'disabled':''} onblur="commitActiveWorkoutValue('${key}','${exKey}','reps',this.value,'${currentReps}')" onkeydown="if(event.key==='Enter'){this.blur();}">
+              <span>reps</span>
+            </div>
           </div>
         </div>
-        <div class="active-workout-controls">
-          <div class="active-workout-control-card"><label>Weight (kg)</label><div class="active-workout-stepper"><button ${!isEditable?'disabled':''} onclick="adjustActiveWorkoutValue('${key}','${exKey}','weight',-2.5,${currentWeight})">−</button><strong>${currentWeight}</strong><button ${!isEditable?'disabled':''} onclick="adjustActiveWorkoutValue('${key}','${exKey}','weight',2.5,${currentWeight})">+</button></div></div>
-          <div class="active-workout-control-card"><label>Reps</label><div class="active-workout-stepper"><button ${!isEditable?'disabled':''} onclick="adjustActiveWorkoutValue('${key}','${exKey}','reps',-1,${currentReps})">−</button><strong>${currentReps}</strong><button ${!isEditable?'disabled':''} onclick="adjustActiveWorkoutValue('${key}','${exKey}','reps',1,${currentReps})">+</button></div></div>
+        <button class="focus-log-btn" ${!isEditable||ed.checked||skipped?'disabled':''} onclick="finishActiveExercise('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">
+          <span>Log Set</span>
+          <span class="material-symbols-outlined">check_circle</span>
+          <em>${ed.checked?'Done':(skipped?'Skipped':`Set ${nextSetNumber} of ${targetSets}`)}</em>
+        </button>
+        <div class="focus-session-head">
+          <h4>Session Progress</h4>
+          <span>${setPct}% Complete</span>
         </div>
-        <div class="active-workout-stats-row">
-          <div class="active-workout-stat"><span>Previous Best</span><strong>${lastWeight?.weight || "—"} <em>kg</em></strong></div>
-          <div class="active-workout-stat"><span>Set Progress</span><strong>${loggedSets}/${targetSets} <em>${setPct}%</em></strong></div>
-        </div>
-        <div class="active-guidance-row">
-          <div class="active-guidance-card">
+        <div class="focus-session-steps">${progressTiles}</div>
+        <div class="focus-guidance-grid">
+          <div class="focus-guidance-card">
             <span>Last Session</span>
             <strong>${lastSession ? `${lastSession.weight}kg × ${lastSession.reps}` : "No data yet"}</strong>
             <em>${lastSession ? lastSession.date : "Start building history"}</em>
           </div>
-          <div class="active-guidance-card accent">
-            <span>Suggested Next Step</span>
+          <div class="focus-guidance-card accent">
+            <span>Next Step</span>
             <strong>${guidanceText}</strong>
-            <em>${getWarmupSuggestion(currentWeight) ? `Warm-up: ${getWarmupSuggestion(currentWeight)}` : "Warm-up appears after weight is set"}</em>
+            <em>${getWarmupSuggestion(currentWeight) ? `Warm-up: ${getWarmupSuggestion(currentWeight)}` : "Dial in the first working set"}</em>
           </div>
         </div>
-        <button class="active-workout-log" ${!isEditable||ed.checked||skipped?'disabled':''} onclick="finishActiveExercise('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')"><span class="material-symbols-outlined">skip_next</span><span>Next Exercise</span><em>${ed.checked?'DONE':(skipped?'SKIPPED':`SET ${nextSetNumber} OF ${targetSets}`)}</em></button>
-        <div class="active-action-row">
-          ${isEditable ? `<button class="active-secondary-btn" onclick="openSwap('${key}',${activeExerciseIndex})">Substitute</button>` : ""}
-          ${isEditable && !ed.checked && !skipped ? `<button class="active-secondary-btn danger" onclick="skipExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Skip</button>` : ""}
-          ${(ed.checked || skipped) && isEditable ? `<button class="active-secondary-btn" onclick="reopenExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Reopen</button>` : ""}
+        <div class="focus-inline-actions">
+          ${isEditable ? `<button class="focus-secondary-btn" onclick="openSwap('${key}',${activeExerciseIndex})">Substitute</button>` : ""}
+          ${isEditable && !ed.checked && !skipped ? `<button class="focus-secondary-btn" onclick="skipExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Skip</button>` : ""}
+          ${(ed.checked || skipped) && isEditable ? `<button class="focus-secondary-btn" onclick="reopenExerciseForParticipant('${key}','${pp}','${activeExercise.name.replace(/'/g,"\\'")}')">Reopen</button>` : ""}
         </div>
-        <div class="active-workout-history"><div class="active-workout-history-head"><h4>Exercise Log</h4><span>${setHistory.length ? `${setHistory.length} logged` : `${targetSets} target sets`}</span></div><div class="active-workout-history-list">${setHistory.length ? setHistory.map((set, index)=>`<div class="active-set-row"><div><strong>${String(index+1).padStart(2,"0")}</strong><span>${set.weight || 0}kg × ${set.reps || 0} reps</span></div><span class="material-symbols-outlined">check_circle</span></div>`).join("") : `<div class="active-set-row active-set-row-empty"><div><strong>00</strong><span>No logged set snapshots yet</span></div><span class="material-symbols-outlined">hourglass_empty</span></div>`}</div></div>
       </section>`;
     }).join("") : `<div class="activity-empty">No exercises in this workout yet.</div>`;
-    const swipeControls=participants.length>1 ? `<div class="active-swipe-head"><button class="active-swipe-btn" onclick="shiftActiveWorkoutParticipant('${key}',-1)"><span class="material-symbols-outlined">chevron_left</span></button><span class="active-swipe-label">${PROFILES[displayedParticipants[0]]?.label||displayedParticipants[0]} · ${activeWorkoutParticipantIndex+1}/${participants.length}</span><button class="active-swipe-btn" onclick="shiftActiveWorkoutParticipant('${key}',1)"><span class="material-symbols-outlined">chevron_right</span></button></div>` : "";
+    const participantTabs=participants.length>1 ? `<div class="focus-participant-tabs">${participants.map((pp,index)=>{ const color=PROFILES[pp]?.color||'#888'; const active=index===activeWorkoutParticipantIndex; return `<button class="focus-participant-tab ${active?'active':''}" style="${active?`--focus-tab:${color}`:''}" type="button" onclick="setActiveWorkoutParticipant('${key}','${pp}')">${PROFILES[pp]?.label||pp}</button>`; }).join("")}</div>` : "";
     const nextExercise=queue.find((item, idx)=>idx>activeExerciseIndex && !item.allDone);
-    const sessionNote=wo.notes||"";
-    panel.innerHTML=`<section class="active-workout-shell">
-      <div class="active-workout-head">
-        <div><p class="active-workout-kicker">${getWorkoutDisplayLabel(key)} • ${day.subtitle || "Workout"}</p><h3 class="active-workout-title">${activeExercise?.name || day.title}</h3></div>
-        <div class="active-workout-rest"><span>Session Clock</span><strong id="session-display-active">${getSessionDisplayText()}</strong><div class="active-timer-actions"><button id="timer-play-active" class="active-timer-btn" onclick="startSessionTimer()">Start</button><button id="timer-pause-active" class="active-timer-btn" style="display:none" onclick="pauseSessionTimer()">Pause</button><button class="active-timer-btn end" onclick="markDone('${key}')">End</button></div></div>
+    panel.innerHTML=`<section class="focus-workout-shell">
+      <header class="focus-workout-topbar">
+        <button class="focus-topbar-btn" type="button" onclick="confirmExitActiveWorkout()" aria-label="Close active workout"><span class="material-symbols-outlined">close</span></button>
+        <div class="focus-topbar-title">${day.title}</div>
+        <button class="focus-finish-btn" type="button" onclick="markDone('${key}')">Finish</button>
+      </header>
+      <div class="focus-workout-body">
+        <section class="focus-current-section">
+          <span class="focus-section-kicker">Current Exercise</span>
+          <h3 class="focus-current-title">${activeExercise?.name || day.title}</h3>
+          <div class="focus-status-row">
+            <div class="focus-status-pill accent">
+              <span>Set</span>
+              <strong>${activeExercise ? `${activeExerciseIndex + 1} / ${Math.max(day.exercises.length,1)}` : "1 / 1"}</strong>
+            </div>
+            <div class="focus-status-pill">
+              <span>Rest</span>
+              <strong id="rest-display-active">${getRestTimerDisplayText()}</strong>
+            </div>
+            <div class="focus-status-pill">
+              <span>Clock</span>
+              <strong id="session-display-active">${getSessionDisplayText()}</strong>
+            </div>
+          </div>
+        </section>
+        ${participantTabs}
+        ${participantCards}
+        <section class="focus-nextup-card">
+          <div class="focus-nextup-head">
+            <span class="material-symbols-outlined">fast_forward</span>
+            <span>Next Up</span>
+          </div>
+          ${nextExercise ? `<div class="focus-nextup-body"><div><strong>${nextExercise.ex.name}</strong><em>${getExerciseTargetSets(nextExercise.ex)} sets • ${nextExercise.ex.reps || "—"} reps</em></div><button class="focus-secondary-btn" type="button" onclick="document.getElementById('queue-item-${nextExercise.index}')?.scrollIntoView({behavior:'smooth',block:'center'})">View Queue</button></div>` : `<div class="focus-nextup-body done"><div><strong>Final Exercise</strong><em>Finish the session when you are ready</em></div><button class="focus-secondary-btn" type="button" onclick="markDone('${key}')">Finish Workout</button></div>`}
+        </section>
+        <section class="focus-queue-shell">
+          <div class="focus-session-head">
+            <h4>Exercise Queue</h4>
+            <span>${pct}% Complete</span>
+          </div>
+          <div class="focus-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="focus-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div><strong>${item.ex.name}</strong><span>${getExerciseTargetSets(item.ex)} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete${item.skippedCount?` • ${item.skippedCount} skipped`:""}</span></div>${canReorderQueue && isEditable ? `<div class="focus-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div>
+        </section>
       </div>
-      <div class="active-workout-visual"><div class="active-workout-overlay"><div class="active-workout-stat"><span>Workout</span><strong>${day.title}</strong></div><div class="active-workout-stat"><span>Progress</span><strong>${pct}<em>%</em></strong></div></div></div>
-      ${participantSelectors}
-      <div class="active-panel-meta"><span>${formatDate(activeDate)}</span>${ton>0?`<span>${ton}kg moved</span>`:""}${isPastDate?`<span>HISTORY EDIT MODE</span>`:""}</div>
-      <section class="active-rest-shell">
-        <div class="active-rest-header"><span>Rest Timer</span><strong id="rest-display-active">${getRestTimerDisplayText()}</strong></div>
-        <div class="active-rest-presets">
-          <button class="active-rest-chip" onclick="startRestTimerPreset(60)">60s</button>
-          <button class="active-rest-chip" onclick="startRestTimerPreset(90)">90s</button>
-          <button class="active-rest-chip" onclick="startRestTimerPreset(120)">120s</button>
-          <button id="rest-toggle-active" class="active-rest-chip" onclick="toggleRestTimerPause()">Pause</button>
-          <button class="active-rest-chip clear" onclick="clearRestTimer()">Clear</button>
-        </div>
-      </section>
-      ${swipeControls}
-      ${participantCards}
-      ${nextExercise ? `<button class="active-workout-next" onclick="document.getElementById('queue-item-${nextExercise.index}')?.scrollIntoView({behavior:'smooth',block:'center'})"><div><span>Next Exercise</span><strong>${nextExercise.ex.name}</strong></div><em>${getExerciseTargetSets(nextExercise.ex)} sets</em></button>` : ""}
-      <section class="active-queue-shell"><div class="active-workout-history-head"><h4>Exercise Queue</h4><span>${canReorderQueue?'Reorder is live during the workout':'Reorder unavailable'}</span></div><div class="active-queue-list">${queue.map(item=>`<div id="queue-item-${item.index}" class="active-queue-item ${item.index===activeExerciseIndex?'current':''} ${item.allDone?'complete':''}"><div class="active-queue-copy"><strong>${item.ex.name}</strong><span>${getExerciseTargetSets(item.ex)} sets • ${item.ex.reps || "—"} reps • ${item.doneCount}/${item.totalCount} complete${item.skippedCount?` • ${item.skippedCount} skipped`:""}</span></div>${canReorderQueue && isEditable ? `<div class="active-queue-actions"><button title="Move up" ${item.index===0?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},-1)"><span class="material-symbols-outlined">keyboard_arrow_up</span></button><button title="Move down" ${item.index===queue.length-1?'disabled':''} onclick="moveExerciseInQueue('${key}',${item.index},1)"><span class="material-symbols-outlined">keyboard_arrow_down</span></button></div>`:""}</div>`).join("")}</div></section>
-      <section class="active-session-note"><label>Session Note</label><textarea id="snote-${key}" class="active-note-input" ${!isEditable?'disabled':''} placeholder="How did this session feel?">${sessionNote}</textarea>${isEditable?`<button class="active-secondary-btn" onclick="saveSessionNote('${key}')">Save Note</button>`:""}</section>
     </section>`;
     panel.style.display="block";
     updateTimerBtns();
@@ -4159,6 +4293,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     unlockDateForEditing(activeDate);
   };
   window.selectDate=function(ds){
+    if(isActiveWorkoutMode()){
+      toast("Finish or close the active workout first");
+      return;
+    }
     activeDate=ds; activeDay=null;
     document.querySelectorAll(".day-card").forEach(c=>c.classList.remove("active"));
     syncWorkoutFocusState();
@@ -4177,6 +4315,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(!WORKOUT_PLAN[key]) return;
     activeDate = getTodayStr();
     const prefilled = prefillWorkoutFromHistory(activeDate, key);
+    enterActiveWorkoutMode(key);
     selectDay(key);
     startSessionTimer();
     if(isCoverScreen()) initCoverPlayerForDay(key);
@@ -4280,6 +4419,22 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderDayPanel(key);
     await saveData();
   };
+  window.commitActiveWorkoutValue=async function(key, exKey, field, rawValue, fallback){
+    const wo=getWorkout(activeDate,key);
+    if(!wo.exercises[exKey]) wo.exercises[exKey]={};
+    const entry=wo.exercises[exKey];
+    if(field==="weight"){
+      const parsed=parseFloat(rawValue);
+      const next=Number.isFinite(parsed) ? Math.max(0, Math.round(parsed*100)/100) : Math.max(0, parseFloat(fallback||0) || 0);
+      entry.weight=String(next);
+    }else{
+      const parsed=parseInt(rawValue,10);
+      const next=Number.isFinite(parsed) ? Math.max(0, parsed) : Math.max(0, parseInt(fallback||0,10) || 0);
+      entry.actualReps=String(next);
+    }
+    renderDayPanel(key);
+    await saveData();
+  };
   window.moveExerciseInQueue=async function(key,index,dir){
     const exs=WORKOUT_PLAN[key]?.exercises;
     if(!exs) return;
@@ -4376,6 +4531,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         saveWorkoutTimeMetaLocal(activeDate,key,activeProfile,{at:t,durationMins:trackedMins,trackedMins});
       }
       resetSessionTimer();
+      exitActiveWorkoutMode();
       // Haptic feedback and confetti for completing workouts
       hapticFeedback([100, 50, 100]);
       showConfetti();
@@ -4577,6 +4733,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     document.getElementById("em").dataset.key=key;
     refreshEditRowIndices();
     closeCardMenu();
+  };
+  window.confirmExitActiveWorkout=function(){
+    if(!isActiveWorkoutMode()) return;
+    const ok=confirm("Close the active workout screen? Logged sets stay saved, but the workout will remain unfinished.");
+    if(!ok) return;
+    pauseSessionTimer();
+    exitActiveWorkoutMode();
+    activeDay=null;
+    const panel=document.getElementById("day-panel");
+    if(panel) panel.style.display="none";
+    renderDayGrid();
+    renderAll();
+    setMobileSection("workouts");
   };
   window.syncEditDayLabel=function(){
     const modal=document.getElementById("em");
@@ -5103,6 +5272,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     updateInstallButton();
   };
   window.openSettings=function(){
+    if(isActiveWorkoutMode()){
+      toast("Finish or close the active workout first");
+      return;
+    }
     notificationsOpen=false;
     const np=document.getElementById("notif-panel");
     if(np) np.style.display="none";
@@ -5757,6 +5930,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     window.addEventListener("online", ()=>{
       syncOfflineState();
       if(hasPendingSync(activeProfile)) saveData();
+    });
+    window.addEventListener("beforeunload", e=>{
+      if(!isActiveWorkoutMode()) return;
+      e.preventDefault();
+      e.returnValue = "";
     });
     window.addEventListener("offline", ()=>{
       syncOfflineState();
