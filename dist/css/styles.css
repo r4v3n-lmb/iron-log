@@ -617,7 +617,7 @@ body[data-active-workout="active"] #day-grid,
 body[data-active-workout="active"] #rdb,
 body[data-active-workout="active"] .workout-tip-card{display:none!important}
 body[data-active-workout="active"] #mobile-workouts-section{display:block!important;min-height:100dvh}
-body[data-active-workout="active"] #day-panel{position:fixed;inset:0;display:block!important;margin:0!important;padding:0!important;border-radius:0!important;background:#131313!important;z-index:1500;overflow:auto}
+body[data-active-workout="active"] #day-panel{position:fixed;inset:0;display:block!important;margin:0!important;padding:0!important;border-radius:0!important;background:#131313!important;z-index:1500;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y}
 .focus-workout-shell{min-height:100dvh;background:#131313;color:var(--text)}
 .focus-workout-topbar{position:sticky;top:0;z-index:4;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 18px 14px;background:rgba(19,19,19,.94);backdrop-filter:blur(18px)}
 .focus-topbar-btn,.focus-finish-btn,.focus-history-btn,.focus-secondary-btn,.focus-swipe-btn,.focus-queue-actions button,.focus-participant-tab{border:none;background:transparent}
@@ -637,6 +637,9 @@ body[data-active-workout="active"] #day-panel{position:fixed;inset:0;display:blo
 .focus-participant-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .focus-participant-tab{min-height:52px;border-radius:16px;background:#232323;color:#a9a2a0;font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}
 .focus-participant-tab.active{background:color-mix(in srgb, var(--focus-tab) 16%, #232323);color:var(--focus-tab);box-shadow:inset 0 -2px 0 var(--focus-tab)}
+.active-track-switches{display:flex;gap:10px;flex-wrap:wrap}
+.active-track-pill{min-height:46px;padding:0 16px;border-radius:16px;border:1px solid rgba(255,255,255,.1);background:#232323;color:#8d8a88;font-family:'Barlow Condensed',sans-serif;font-size:.88rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}
+.active-track-pill.selected{border-color:var(--track);background:color-mix(in srgb, var(--track) 16%, #232323)}
 .focus-logging-card,.focus-nextup-card,.focus-queue-shell{padding:18px;border-radius:24px;background:#201f1f;box-shadow:0 20px 40px rgba(0,0,0,.18)}
 .focus-logging-card.complete{outline:1px solid rgba(92,186,92,.28)}
 .focus-participant-pill{justify-self:start;padding:8px 10px;border-radius:999px;background:rgba(255,255,255,.06);color:var(--participant,var(--accent-soft))}
@@ -650,6 +653,7 @@ body[data-active-workout="active"] #day-panel{position:fixed;inset:0;display:blo
 .focus-metric-input{width:100%;border:none;background:transparent;color:#c4cadb;font-family:'Barlow Condensed',sans-serif;font-size:3rem;line-height:.9;font-weight:900;outline:none;text-align:center}
 .focus-metric-input::-webkit-outer-spin-button,.focus-metric-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .focus-metric-input[type=number]{-moz-appearance:textfield}
+.focus-metric-input:focus{color:#f1edea}
 .focus-input-shell span{font-size:1rem;font-weight:800;letter-spacing:.12em;color:#725449;text-transform:uppercase}
 .focus-log-btn{width:100%;margin-top:18px;padding:18px 18px 14px;border:none;border-radius:20px;background:linear-gradient(90deg,var(--accent-soft),#ff6d1f);color:#311205;display:flex;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;box-shadow:0 20px 34px rgba(242,100,17,.2)}
 .focus-log-btn span:first-child{font-family:'Barlow Condensed',sans-serif;font-size:2rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}

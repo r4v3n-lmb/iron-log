@@ -12,7 +12,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.40";
+  const APP_VERSION = "v1.1.42";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -774,6 +774,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       if(!WORKOUT_PLAN[key]) return;
       WORKOUT_PLAN[key].order = index + 1;
       if(!String(WORKOUT_PLAN[key].label || "").trim()) WORKOUT_PLAN[key].label = `DAY ${index + 1}`;
+      WORKOUT_PLAN[key].exercises = (WORKOUT_PLAN[key].exercises || []).map(ex=>{
+        const parsedSets = parseInt(ex?.sets, 10);
+        const sets = !Number.isFinite(parsedSets) || parsedSets <= 0 || parsedSets === 3 ? 4 : parsedSets;
+        return { ...ex, sets };
+      });
     });
   }
   function getExerciseTargetSets(exercise){
@@ -1455,7 +1460,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   };
 
   function createEditRowMarkup(ex = {}, index = 0){
-    const sets = parseInt(ex.sets || 0, 10) || 0;
+    const sets = parseInt(ex.sets || 4, 10) || 4;
     const reps = ex.reps || "12";
     return `<div class="eer" data-index="${index}" draggable="true" ondragstart="startEditRowDrag(event)" ondragend="endEditRowDrag(event)" ondragover="onEditRowDragOver(event)" ondragleave="onEditRowDragLeave(event)" ondrop="onEditRowDrop(event)">
       <span class="eed" title="Drag to reorder">⠿</span>
@@ -3482,6 +3487,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             </div>
           </div>
         </section>
+        ${participantSelectors}
         ${participantTabs}
         ${participantCards}
         <section class="focus-nextup-card">
@@ -5078,7 +5084,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.confirmSwap=async function(){
     const m=document.getElementById("swm"),key=m.dataset.key,i=parseInt(m.dataset.i);
     const n=document.getElementById("swn").value.trim(); if(!n){toast("⚠️ Enter name");return;}
-    const s=parseInt(document.querySelector("#swap-stepper-root .stepper-group")?.dataset.value||document.getElementById("sws").value,10)||3, r=document.getElementById("swr").value.trim()||"12";
+    const s=parseInt(document.querySelector("#swap-stepper-root .stepper-group")?.dataset.value||document.getElementById("sws").value,10)||4, r=document.getElementById("swr").value.trim()||"12";
     WORKOUT_PLAN[key].exercises[i]={name:n,sets:s,reps:r}; closeSwap(); renderDayPanel(key); await saveData(); toast(`✓ Swapped to ${n}`);
   };
 
