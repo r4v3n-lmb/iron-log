@@ -74,7 +74,7 @@ This creates a fresh `dist/` folder containing:
 - `dist/service-worker.js`
 - `dist/icons/*`
 
----
+The build also syncs root runtime files (`index.html`, `ironlog.html`, `js/`, `css/`, `manifest.json`, `service-worker.js`, `icons/`) from `src/` to keep source/build versions aligned.
 
 ## Distribution
 

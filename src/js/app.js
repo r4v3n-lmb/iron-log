@@ -33,8 +33,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   let WORKOUT_PLAN = {};
 
   const DEFAULT_ACCOUNTS = {
-    revan:  { name:"Revan",   pin:"1997", color:"#e85d04", birthday:"04-30", water:3.0, protein:160, height:180, weighMode:"daily" },
-    bronwen:{ name:"Bronwen", pin:"2002", color:"#f72585", birthday:"04-25", water:2.5, protein:120, height:162, weighMode:"daily" }
+    revan:  { name:"Revan",   pinHash:"e713b8365fd980064c2383fc19f8a41be76a5dc1c37fb3b4ad9d0df29ac20eac", color:"#e85d04", birthday:"04-30", water:3.0, protein:160, height:180, weighMode:"daily" },
+    bronwen:{ name:"Bronwen", pinHash:"c41721d4d87370ba2668cf50c4d137245af61214aba5c2d3cdc27e42c27cc686", color:"#f72585", birthday:"04-25", water:2.5, protein:120, height:162, weighMode:"daily" }
   };
   let accountRegistry = {};
   let PROFILES = {};
@@ -101,6 +101,38 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   const isCoverScreen = ()=>false;
 
   const ACCOUNTS_DOC = "accounts";
+  async function sha256Hex(text){
+    const data = new TextEncoder().encode(String(text ?? ""));
+    const digest = await crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,"0")).join("");
+  }
+  async function hashPinForProfile(profileKey, pin){
+    return sha256Hex(`${profileKey}::${String(pin || "").trim()}`);
+  }
+  async function verifyAccountPin(profileKey, pin){
+    const acct = accountRegistry?.[profileKey];
+    if(!acct?.pinHash) return false;
+    const candidate = await hashPinForProfile(profileKey, pin);
+    return candidate === String(acct.pinHash);
+  }
+  async function migrateAccountPinsIfNeeded(){
+    let changed = false;
+    for(const pk of Object.keys(accountRegistry || {})){
+      const acct = accountRegistry[pk];
+      if(!acct || typeof acct !== "object") continue;
+      if(!acct.pinHash && acct.pin){
+        acct.pinHash = await hashPinForProfile(pk, acct.pin);
+        delete acct.pin;
+        changed = true;
+        continue;
+      }
+      if(acct.pinHash && acct.pin){
+        delete acct.pin;
+        changed = true;
+      }
+    }
+    return changed;
+  }
   function getSnapshotStorageKey(profileKey=activeProfile){ return `ironlog_pwa_snapshot_${profileKey}`; }
   function getPendingSyncStorageKey(profileKey=activeProfile){ return `ironlog_pwa_pending_sync_${profileKey}`; }
   function buildLocalSnapshot(){
@@ -289,6 +321,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         accountRegistry = deepCopy(DEFAULT_ACCOUNTS);
         await setDoc(ref,{users:accountRegistry},{merge:true});
       }
+      if(await migrateAccountPinsIfNeeded()) await persistAccounts();
       buildProfilesFromAccounts();
       if(!PROFILES[activeProfile]){
         const first = Object.keys(PROFILES)[0] || "revan";
@@ -339,7 +372,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const keys=Object.keys(accountRegistry||{});
     sel.innerHTML=keys.map(k=>{
       const nm=accountRegistry[k]?.name||k;
-      return `<option value="${k}">${nm}</option>`;
+      return `<option value="${escAttr(k)}">${escHtml(nm)}</option>`;
     }).join("");
     if(keys.length){
       const remembered=localStorage.getItem("ironlog_profile");
@@ -384,7 +417,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const pin=(pinEl?.value||"").trim();
     if(!pk || !accountRegistry[pk]){ showAuthError("Select a user account"); return; }
     if(!pin){ showAuthError("Enter PIN"); return; }
-    if(pin !== String(accountRegistry[pk].pin||"")){
+    if(!(await verifyAccountPin(pk, pin))){
       showAuthError("Incorrect PIN");
       return;
     }
@@ -407,7 +440,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(accountRegistry[pk]){ showAuthError("A user with that name already exists"); return; }
     accountRegistry[pk]={
       name,
-      pin,
+      pinHash:await hashPinForProfile(pk, pin),
       color,
       height,
       water,
@@ -1117,13 +1150,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     }
   }
 
-  window.switchProfile=function(pk){
+  window.switchProfile=async function(pk){
     if(pk===activeProfile) return;
     const acct=accountRegistry[pk];
     if(!acct){ toast("⚠️ Account not found"); return; }
     const pin=prompt(`Enter PIN for ${acct.name||pk}`);
     if(pin===null) return;
-    if(String(pin).trim()!==String(acct.pin||"")){
+    if(!(await verifyAccountPin(pk, pin))){
       toast("⚠️ Incorrect PIN");
       return;
     }
@@ -1464,9 +1497,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const reps = ex.reps || "12";
     return `<div class="eer" data-index="${index}" draggable="true" ondragstart="startEditRowDrag(event)" ondragend="endEditRowDrag(event)" ondragover="onEditRowDragOver(event)" ondragleave="onEditRowDragLeave(event)" ondrop="onEditRowDrop(event)">
       <span class="eed" title="Drag to reorder">⠿</span>
-      <input class="een" list="exercise-options" value="${ex.name || ""}" placeholder="Exercise name">
+      <input class="een" list="exercise-options" value="${escAttr(ex.name || "")}" placeholder="Exercise name">
       ${stepperMarkup(sets,{ step:1, min:0, max:10, unit:"sets" })}
-      <input class="eer2" value="${reps}" placeholder="Reps" style="width:56px">
+      <input class="eer2" value="${escAttr(reps)}" placeholder="Reps" style="width:56px">
       <button class="edb" onclick="this.closest('.eer').remove(); refreshEditRowIndices()" title="Remove">🗑</button>
     </div>`;
   }
@@ -3171,10 +3204,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       return;
     }
     el.innerHTML = names.map(name => `<div class="template-item">
-      <span class="template-name">${name}</span>
+      <span class="template-name">${escHtml(name)}</span>
       <div class="template-btns">
-        <button class="template-btn-load" onclick="loadTemplate('${name}')">LOAD</button>
-        <button class="template-btn-del" onclick="deleteTemplate('${name}')">DEL</button>
+        <button class="template-btn-load" onclick="loadTemplate('${escJsStr(name)}')">LOAD</button>
+        <button class="template-btn-del" onclick="deleteTemplate('${escJsStr(name)}')">DEL</button>
       </div>
     </div>`).join('');
   }
@@ -4700,15 +4733,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   // ─── EDIT MODAL ───
   window.openEdit=function(key){
     const day=WORKOUT_PLAN[key];
+    const safeDayColor = sanitizeCssColor(day.color, "#888");
     renderExerciseOptions();
     document.getElementById("emit").textContent=`EDIT ${getWorkoutDisplayLabel(key)} — ${day.title}`;
-    document.getElementById("emit").style.color=day.color;
+    document.getElementById("emit").style.color=safeDayColor;
     let h=`<div class="editor-shell">
       <section class="editor-section">
         <div class="editor-grid">
-          <label class="editor-field"><span>DAY SLOT (AUTO)</span><input id="edit-label-input" class="fi" type="text" value="${getEditableWorkoutLabel(key)}" readonly></label>
-          <label class="editor-field"><span>WORKOUT TITLE</span><input id="edit-title-input" class="fi" type="text" value="${day.title}" placeholder="e.g. Push"></label>
-          <label class="editor-field editor-field-wide"><span>SUBTITLE / MUSCLE GROUPS</span><input id="edit-subtitle-input" class="fi" type="text" value="${day.subtitle}" placeholder="e.g. Chest · Shoulders · Triceps"></label>
+          <label class="editor-field"><span>DAY SLOT (AUTO)</span><input id="edit-label-input" class="fi" type="text" value="${escAttr(getEditableWorkoutLabel(key))}" readonly></label>
+          <label class="editor-field"><span>WORKOUT TITLE</span><input id="edit-title-input" class="fi" type="text" value="${escAttr(day.title)}" placeholder="e.g. Push"></label>
+          <label class="editor-field editor-field-wide"><span>SUBTITLE / MUSCLE GROUPS</span><input id="edit-subtitle-input" class="fi" type="text" value="${escAttr(day.subtitle)}" placeholder="e.g. Chest · Shoulders · Triceps"></label>
           <label class="editor-field"><span>SCHEDULED WEEKDAY</span>
         <select id="edit-weekday-input" class="fsel" onchange="syncEditDayLabel()">
           <option value="-1" ${day.weekday==null?'selected':''}>— No fixed day —</option>
@@ -4727,13 +4761,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     day.exercises.forEach((ex,i)=>{
       h+=createEditRowMarkup(ex, i);
     });
-    h+=`</div><button class="eab" onclick="addEditRow()" style="border-color:${day.color};color:${day.color}">+ ADD EXERCISE</button></section>`;
+    h+=`</div><button class="eab" onclick="addEditRow()" style="border-color:${safeDayColor};color:${safeDayColor}">+ ADD EXERCISE</button></section>`;
     if(canManageWorkoutParticipants()){
       h+=`<section class="editor-section"><div class="editor-section-head"><strong>Participants</strong></div><label class="editor-check"><input type="checkbox" id="edit-participants-bronwen" ${day.participants?.includes('bronwen')?'checked':''}><span>Bronwen also does this workout</span></label></section>`;
     } else {
       h+=`<section class="editor-section"><div class="editor-section-head"><strong>Participants</strong><span>Only Revan can change workout participants.</span></div></section>`;
     }
-    h+=`<section class="editor-section"><label class="editor-field editor-field-wide"><span>WORKOUT NOTES</span><textarea id="edit-notes-input" class="fi editor-notes" placeholder="Add notes about this workout...">${day.notes||''}</textarea></label></section></div>`;
+    h+=`<section class="editor-section"><label class="editor-field editor-field-wide"><span>WORKOUT NOTES</span><textarea id="edit-notes-input" class="fi editor-notes" placeholder="Add notes about this workout...">${escHtml(day.notes||"")}</textarea></label></section></div>`;
     document.getElementById("emb").innerHTML=h;
     document.getElementById("em").style.display="flex";
     document.getElementById("em").dataset.key=key;
@@ -4847,15 +4881,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   // ─── SAVE WORKOUT LIBRARY ───
   window.openSave=function(key){
     const day=WORKOUT_PLAN[key], saved=state.savedWorkouts||{}, sk=Object.keys(saved);
-    let h=`<div class="save-workout-shell"><div class="save-workout-copy">Save <strong>${day.title}</strong> to your workout library. Choose a slot to replace or create a fresh entry.</div>`;
+    let h=`<div class="save-workout-shell"><div class="save-workout-copy">Save <strong>${escHtml(day.title)}</strong> to your workout library. Choose a slot to replace or create a fresh entry.</div>`;
     if(sk.length){
       h+=`<div class="save-workout-grid">`;
       sk.forEach(k=>{
-        h+=`<button class="save-workout-option" onclick="confirmSave('${key}','${k}')"><span>Replace</span><strong>${saved[k].title}</strong></button>`;
+        h+=`<button class="save-workout-option" onclick="confirmSave('${escJsStr(key)}','${escJsStr(k)}')"><span>Replace</span><strong>${escHtml(saved[k].title)}</strong></button>`;
       });
       h+=`</div>`;
     }
-    if(sk.length<10) h+=`<button class="save-workout-new" onclick="confirmSave('${key}',null)">+ SAVE AS NEW</button>`;
+    if(sk.length<10) h+=`<button class="save-workout-new" onclick="confirmSave('${escJsStr(key)}',null)">+ SAVE AS NEW</button>`;
     h+=`</div>`;
     document.getElementById("svmb").innerHTML=h;
     document.getElementById("svm").style.display="flex"; closeCardMenu();
@@ -5496,6 +5530,23 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function escHtml(v){
     return String(v ?? "").replace(/[&<>"']/g,(m)=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[m]));
   }
+  function escAttr(v){
+    return escHtml(v).replace(/`/g,"&#96;");
+  }
+  function escJsStr(v){
+    return String(v ?? "")
+      .replace(/\\/g,"\\\\")
+      .replace(/'/g,"\\'")
+      .replace(/\r/g,"\\r")
+      .replace(/\n/g,"\\n")
+      .replace(/</g,"\\x3c");
+  }
+  function sanitizeCssColor(value, fallback="#888"){
+    const color = String(value || "").trim();
+    if(/^#([0-9a-fA-F]{3,8})$/.test(color)) return color;
+    if(/^(rgba?|hsla?)\([\d\s.,%+-]+\)$/.test(color)) return color;
+    return fallback;
+  }
   function bytesForObject(obj){
     try{
       return new TextEncoder().encode(JSON.stringify(obj ?? {})).length;
@@ -5546,7 +5597,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       tables:adminTablesCache
     };
     downloadText(`ironlog_data_pack_${ts}.json`,JSON.stringify(pack,null,2),"application/json");
-    downloadText(`ironlog_users_${ts}.csv`,toCsv(["key","name","pin","height_cm","water_l","protein_g","color","created_at"],adminTablesCache.users||[]),"text/csv");
+    downloadText(`ironlog_users_${ts}.csv`,toCsv(["key","name","height_cm","water_l","protein_g","color","created_at"],adminTablesCache.users||[]),"text/csv");
     downloadText(`ironlog_workouts_${ts}.csv`,toCsv(["user","date","day_key","done","exercise_entries","note"],adminTablesCache.workouts||[]),"text/csv");
     downloadText(`ironlog_exercises_${ts}.csv`,toCsv(["user","exercise","source","sets","reps","muscle_group"],adminTablesCache.exercises||[]),"text/csv");
     downloadText(`ironlog_collected_${ts}.csv`,toCsv(["user","date","type","value","water_l","protein_g","calories","sleep_h","soreness"],adminTablesCache.collected||[]),"text/csv");
@@ -5656,7 +5707,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         return {
           key:pk,
           name:a.name||pk,
-          pin:a.pin||"",
           height_cm:a.height||"",
           water_l:a.water||"",
           protein_g:a.protein||"",
@@ -5772,7 +5822,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const filteredExercises=applyAdminFilters(exerciseRows);
       const filteredCollected=applyAdminFilters(collectedRows);
       const allUsers=Array.from(new Set([...Object.keys(accounts),...Object.keys(profileData)])).sort();
-      const userOptions=['<option value="all">ALL USERS</option>',...allUsers.map(u=>`<option value="${u}" ${adminFilterUser===u?'selected':''}>${u.toUpperCase()}</option>`)].join("");
+      const userOptions=['<option value="all">ALL USERS</option>',...allUsers.map(u=>`<option value="${escAttr(u)}" ${adminFilterUser===u?'selected':''}>${escHtml(u.toUpperCase())}</option>`)].join("");
       adminTablesCache = {
         users:userRows,
         workouts:workoutRows,
@@ -5800,7 +5850,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             <input id="adm-filter-to" class="fi" type="date" value="${escHtml(adminDateTo)}" onchange="setAdminFiltersFromUi()">
           </div>
         </section>
-        ${buildTable("Users",["key","name","pin","height_cm","water_l","protein_g","color","created_at"],filteredUsers,usersBytes)}
+        ${buildTable("Users",["key","name","height_cm","water_l","protein_g","color","created_at"],filteredUsers,usersBytes)}
         ${buildTable("Workouts",["user","date","day_key","done","exercise_entries","note"],filteredWorkouts,workoutsBytes)}
         ${buildTable("Exercises",["user","exercise","source","sets","reps","muscle_group"],filteredExercises,exercisesBytes)}
         ${buildTable("Collected Data",["user","date","type","value","water_l","protein_g","calories","sleep_h","soreness"],filteredCollected,collectedBytes)}
@@ -5835,33 +5885,35 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       return haystack.includes(workoutSearchQuery);
     });
     if(!keys.length){
-      grid.innerHTML = `<div class="day-card adc empty-state-card"><div class="adl">No workouts match "${workoutSearchQuery}"</div></div>`;
+      grid.innerHTML = `<div class="day-card adc empty-state-card"><div class="adl">No workouts match "${escHtml(workoutSearchQuery)}"</div></div>`;
       return;
     }
     keys.forEach(key=>{
       const day=WORKOUT_PLAN[key],isT=key===tdk;
+      const safeKey = escJsStr(key);
+      const safeColor = sanitizeCssColor(day.color, "#888");
       const isShared=(day.participants||[]).length>1;
       const exerciseCount = (day.exercises||[]).length;
       const card=document.createElement("div");
       card.className="day-card"+(isT?" today-card":"")+(key===activeDay?" active":"");
-      card.id=`card-${key}`; card.style.setProperty("--c",day.color||"#333");
+      card.id=`card-${key}`; card.style.setProperty("--c",safeColor);
       card.innerHTML=`<div class="day-card-shell">
         <div class="day-card-top">
           <div>
-            <div class="cl" style="color:${day.color||"#888"}">${getWorkoutDisplayLabel(key)} · ${getWorkoutWeekdayLabel(day.weekday)}</div>
-            <div class="ct">${day.title||"WORKOUT"}</div>
-            <div class="cs">${day.subtitle||""}</div>
+            <div class="cl" style="color:${safeColor}">${escHtml(getWorkoutDisplayLabel(key))} · ${escHtml(getWorkoutWeekdayLabel(day.weekday))}</div>
+            <div class="ct">${escHtml(day.title||"WORKOUT")}</div>
+            <div class="cs">${escHtml(day.subtitle||"")}</div>
           </div>
-          <button class="cmb" title="Options" onclick="toggleCardMenu(event,'${key}')">⋮</button>
+          <button class="cmb" title="Options" onclick="toggleCardMenu(event,'${safeKey}')">⋮</button>
         </div>
         <div class="day-card-metrics">
           <span class="workout-metric"><span class="material-symbols-outlined">schedule</span><strong>${Math.max(exerciseCount * 8, 20)}</strong><em>MIN</em></span>
           <span class="workout-metric"><span class="material-symbols-outlined">list_alt</span><strong>${String(exerciseCount).padStart(2,"0")}</strong><em>EXERCISES</em></span>
         </div>
-        <div class="cb"><div class="card-bar-fill" style="background:${day.color||"#444"};height:100%;width:0%;transition:width .4s"></div></div>
+        <div class="cb"><div class="card-bar-fill" style="background:${safeColor};height:100%;width:0%;transition:width .4s"></div></div>
         <div class="day-card-actions">
-          <button class="day-card-edit" onclick="event.stopPropagation();openEdit('${key}')">Edit Plan</button>
-          <button class="day-card-start" onclick="event.stopPropagation();startWorkout('${key}')"><span class="material-symbols-outlined">play_arrow</span></button>
+          <button class="day-card-edit" onclick="event.stopPropagation();openEdit('${safeKey}')">Edit Plan</button>
+          <button class="day-card-start" onclick="event.stopPropagation();startWorkout('${safeKey}')"><span class="material-symbols-outlined">play_arrow</span></button>
         </div>
         ${isShared?'<div class="shared-pill">Shared</div>':''}
         ${isT?'<div class="ctb">TODAY</div>':''}
