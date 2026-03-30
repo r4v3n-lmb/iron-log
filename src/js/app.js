@@ -1,5 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getFirestore, doc, setDoc, getDoc, getDocFromServer, onSnapshot, deleteField, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDwkvvVwJbk3JC_ddej74sFOxgPBl2ccE8",
@@ -12,7 +13,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  const APP_VERSION = "v1.1.43";
+  const storage = getStorage(app);
+  const APP_VERSION = "v1.1.44";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -3149,17 +3151,28 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.handleProfileAvatarUpload=function(event){
     const file=event.target?.files?.[0];
     if(!file) return;
-    const reader=new FileReader();
-    reader.onload=async ()=>{
+    if(!String(file.type||"").startsWith("image/")){
+      toast("⚠️ Please choose an image file");
+      event.target.value="";
+      return;
+    }
+    (async ()=>{
       if(!state.userOverrides) state.userOverrides={};
       const cur=state.userOverrides[activeProfile]||{};
-      state.userOverrides[activeProfile]={...cur,avatar:String(reader.result||"")};
+      const cleanName=String(file.name||"avatar").replace(/[^a-zA-Z0-9._-]/g,"_");
+      const path=`avatars/${activeProfile}/${Date.now()}_${cleanName}`;
+      const avatarRef=storageRef(storage, path);
+      await uploadBytes(avatarRef, file, { contentType: file.type || "image/jpeg" });
+      const downloadUrl=await getDownloadURL(avatarRef);
+      state.userOverrides[activeProfile]={...cur,avatar:String(downloadUrl||"")};
       applyUserOverrides(state.userOverrides);
       renderProfileShell();
       await saveData();
       toast("✓ Profile image updated");
-    };
-    reader.readAsDataURL(file);
+    })().catch(err=>{
+      console.error("[IronLog] avatar upload failed:", err);
+      toast("⚠️ Avatar upload failed. Check Firebase Storage rules.");
+    });
     event.target.value="";
   };
   function renderVisualProgressGallery(){
