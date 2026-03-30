@@ -56,6 +56,31 @@ During development, edit files in the `src/` folder:
 
 ---
 
+## UI QA Checklist
+
+Use this quick checklist before publishing UI changes:
+
+- Run `npm run build` and verify no build errors.
+- Check all main modules on mobile and desktop:
+  - Dashboard
+  - Workouts
+  - Progress
+  - Profile
+  - Rank
+  - Settings
+- Confirm typography consistency:
+  - headline sizing and spacing
+  - label/caption letter-spacing
+  - button text scale
+- Confirm interactive consistency:
+  - hover/active states
+  - focus-visible outlines for keyboard navigation
+  - modal open/close behavior
+- Validate spacing/radius consistency on cards, buttons, and form fields.
+- Spot-check admin and management tools for overflow/table/layout issues.
+
+---
+
 ## Building
 
 To generate the deployable PWA bundle:

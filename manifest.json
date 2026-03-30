@@ -2,7 +2,7 @@
   "name": "Iron Log",
   "short_name": "Iron Log",
   "description": "Strength training tracker with routines, progress, recovery tracking, and installable PWA support.",
-  "start_url": "./ironlog.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
