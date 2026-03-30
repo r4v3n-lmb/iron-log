@@ -1,5 +1,7 @@
 # IRON LOG
 
+**App version:** `v1.1.43`
+
 A modular workout tracking PWA with Firebase backend. Edit the source app in `src/`, then build a clean deployable site into `dist/`.
 
 **Live app:** https://r4v3n-lmb.github.io/iron-log/
