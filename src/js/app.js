@@ -1597,6 +1597,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       initCoverPlayerForDay(activeDay);
     }
     setMobileSection(section);
+    if(section === "rank") renderRankLeaderboard();
     const map = {
       dashboard: "mobile-home-section",
       workouts: "mobile-workouts-section",
@@ -2426,7 +2427,22 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function renderRankLeaderboard(){
     const root = document.getElementById("mobile-rank-section");
     if(!root) return;
-    const rows = getRankRows();
+    let rows = [];
+    try{
+      rows = getRankRows();
+    }catch(err){
+      console.error("[IronLog] Rank render failed to collect rows", err);
+      rows = [];
+    }
+    if(!Array.isArray(rows) || !rows.length){
+      rows = [{
+        profileKey: activeProfile || "user",
+        name: formatRankName(activeProfile || "user"),
+        avatar: getRankAvatar(activeProfile || "user"),
+        score: 0,
+        rank: 1
+      }];
+    }
     const top = rows.slice(0,3);
     const rest = rows.slice(3);
     const you = rows.find(r=>r.profileKey===activeProfile) || rows[0] || { rank:1, score:0 };
@@ -5671,7 +5687,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <div class="mg-workout-list">` + (items.length?items.map(k=>{
         const d=WORKOUT_PLAN[k];
         const index = items.indexOf(k);
-        return `<div class="template-item"><span class="template-name">${getWorkoutDisplayLabel(k)} · ${d.title}<em>${getWorkoutWeekdayLabel(d.weekday)}</em></span><div class="template-btns"><button class="template-btn-load" ${index===0?'disabled':''} onclick="moveWorkoutDay('${k}',-1)">UP</button><button class="template-btn-load" ${index===items.length-1?'disabled':''} onclick="moveWorkoutDay('${k}',1)">DOWN</button><button class="template-btn-load" onclick="closeSettings();setTimeout(()=>openEdit('${k}'),60)">EDIT</button><button class="template-btn-del" onclick="deleteDay('${k}')">DELETE</button></div></div>`;
+        const weekdayMeta = getWorkoutWeekdayLabel(d.weekday);
+        return `<div class="template-item"><span class="template-name">${getWorkoutDisplayLabel(k)} · ${d.title}<em>${weekdayMeta==="—"?"NO FIXED DAY":`SCHEDULED ${weekdayMeta}`}</em></span><div class="template-btns"><button class="template-btn-load" ${index===0?'disabled':''} onclick="moveWorkoutDay('${k}',-1)">UP</button><button class="template-btn-load" ${index===items.length-1?'disabled':''} onclick="moveWorkoutDay('${k}',1)">DOWN</button><button class="template-btn-load" onclick="closeSettings();setTimeout(()=>openEdit('${k}'),60)">EDIT</button><button class="template-btn-del" onclick="deleteDay('${k}')">DELETE</button></div></div>`;
       }).join(''):`<div class="mg-empty">No workout days yet. Add your first training day.</div>`) + `</div></section>`;
       return;
     }
@@ -6184,8 +6201,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       card.id=`card-${key}`; card.style.setProperty("--c",safeColor);
       card.innerHTML=`<div class="day-card-shell">
         <div class="day-card-top">
-          <div>
-            <div class="cl" style="color:${safeColor}">${escHtml(getWorkoutDisplayLabel(key))} · ${escHtml(getWorkoutWeekdayLabel(day.weekday))}</div>
+          <div class="day-card-heading">
+            <div class="cl" style="color:${safeColor}">${escHtml(getWorkoutDisplayLabel(key))}</div>
             <div class="ct">${escHtml(day.title||"WORKOUT")}</div>
             <div class="cs">${escHtml(day.subtitle||"")}</div>
           </div>
