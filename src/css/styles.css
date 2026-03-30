@@ -1149,7 +1149,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 
 /* IRON LEAGUE RANK SCREEN */
 body[data-mobile-section="rank"] .hdr,
-body[data-mobile-section="rank"] .bottom-nav{display:none!important}
+body[data-mobile-section="rank"] .hdr{display:none!important}
 body[data-mobile-section="rank"] .main{padding:0!important;max-width:none}
 .irl-screen{min-height:100dvh;background:#131313;color:#e5e2e1}
 .irl-topbar{position:fixed;top:0;left:0;right:0;z-index:50;background:rgba(19,19,19,.8);backdrop-filter:blur(20px);display:flex;justify-content:space-between;align-items:center;padding:0 24px;height:64px}
@@ -1158,7 +1158,7 @@ body[data-mobile-section="rank"] .main{padding:0!important;max-width:none}
 .irl-brand{margin:0;color:#e85d04;font-family:'Barlow Condensed',sans-serif;font-style:italic;font-weight:900;letter-spacing:-.02em;font-size:2rem;line-height:1;text-transform:uppercase}
 .irl-avatar{width:32px;height:32px;border-radius:999px;overflow:hidden;border:1px solid rgba(89,65,55,.3)}
 .irl-avatar img{width:100%;height:100%;object-fit:cover}
-.irl-main{padding:94px 16px 188px;max-width:640px;margin:0 auto;display:grid;gap:20px}
+.irl-main{padding:94px 16px 228px;max-width:640px;margin:0 auto;display:grid;gap:20px}
 .irl-tab-toggle{display:flex;gap:8px;padding:4px;background:#1c1b1b;border-radius:12px}
 .irl-tab{flex:1;border:none;border-radius:10px;height:44px;background:transparent;color:rgba(229,226,225,.6);font-size:.95rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
 .irl-tab.active{background:linear-gradient(135deg,#ffb596 0%,#f26411 100%);color:#581e00;box-shadow:0 8px 20px rgba(242,100,17,.24)}
@@ -1194,7 +1194,7 @@ body[data-mobile-section="rank"] .main{padding:0!important;max-width:none}
 .irl-row-score{text-align:right}
 .irl-row-score strong{display:block;font-family:'Barlow Condensed',sans-serif;font-style:italic;font-weight:900;font-size:2rem;line-height:.92}
 .irl-row-score p{margin:4px 0 0;color:rgba(229,226,225,.4);font-size:.56rem;font-weight:800;letter-spacing:.15em;text-transform:uppercase}
-.irl-you-card{position:fixed;left:16px;right:16px;bottom:86px;z-index:40}
+.irl-you-card{position:fixed;left:16px;right:16px;bottom:calc(78px + env(safe-area-inset-bottom));z-index:40}
 .irl-you-shell{padding:1px;border-radius:18px;background:linear-gradient(135deg,#ffb596 0%,#f26411 100%);box-shadow:0 12px 36px rgba(242,100,17,.28)}
 .irl-you-shell{display:flex;align-items:center;gap:14px;padding:14px 16px;background:#1c1b1b;border-radius:17px}
 .irl-you-avatar-wrap{position:relative}

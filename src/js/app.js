@@ -99,6 +99,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function isAdminUser(){ return activeProfile==="revan"; }
   const FIRESTORE_SPARK_LIMIT_BYTES = 1024 * 1024 * 1024;
   const RANK_DEFAULT_AVATAR = "https://lh3.googleusercontent.com/aida-public/AB6AXuAq14oMwfSCnwBlXk3jrf7FxHlEGkdGCJ7_YDaVjG3m90MvqbBNMy49zmc1M1xGjqaO13UXDzihsmsZu0ao_kZ06bBAVcs1SK_XqldIqHNvXcv-kefl6nNY8swPpqwVyT7KpNCjpv8CJWf0fEBQdKfro9nJugvF2YWMwdJ4w3iiq90kn3HGlzfGCc8RjV41-uUt_vbH_MLBTmXonvj5AZUJ3F6CGyROmdBZlx-ELMRMejZp4qHssKfX9g4UHE6VriWa6WEzpnbFciI";
+  const RANK_FEMALE_DEFAULT_AVATARS = {
+    bronwen: "https://lh3.googleusercontent.com/aida-public/AB6AXuDi_O5I3jvmOc3zOVkMmiHzEaykyd0oINLtwVsikQ3HMkqC9LiJkBqUda7s2ouK417Dykrg3YMMerQ-jJszuv6OsO3ZSCQDZ6lDmFRAfpinCzZA-g-_eFBBFeBz7l3ZxuqiAnbHqReFRI9OcWQMdhJT_zJaF7SGOjb1ZiBrUYLM8DnO8cbyAsztQzJvBo4crUkIogByw1k4m8Cmfth6m-ZANEKOwz3Nm7ETgKnGSxcz5-7kaeov_v5Pd7v-du7GMi8NHOhiX28BZbQ",
+    melissa: "https://lh3.googleusercontent.com/aida-public/AB6AXuB6PaAJjwbZGVm7yRTaxNtPcbuAITslwHPnQMf-TXusMI_IrVbhXB65KJS2oibhEjtCX1nmzSoWSN6u737NYRxHSYaefLu4xbJVY35SjW0r6SO6P64WTxDP3Tn7sdViqwr3g7iYBFy0bwq9XkyfEiU1tC7oSrxBJeuS26KpT2OUISP9AWk7UlczYeHPJ4mYcLX1nPDi--kdcCfd8faxcttl1KR6mN5h8pKCnIOXZQVZhjdO6u8kdbTQ7zvKVtEn5rGCRbYwqCBDXFY"
+  };
   const isMobile = ()=>window.innerWidth <= 600;
   // The dedicated active-workout screen now handles all mobile sizes.
   const isCoverScreen = ()=>false;
@@ -2265,9 +2269,23 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function getRankAvatar(profileKey){
     if(profileKey===activeProfile) return getProfileAvatarSrc(profileKey);
     const bucket = getRankBucket(profileKey);
+    const lower = String(profileKey || "").toLowerCase();
+    const genderFallback = RANK_FEMALE_DEFAULT_AVATARS[lower] || RANK_DEFAULT_AVATAR;
     return bucket?.userOverrides?.[profileKey]?.avatar
       || bucket?.userOverrides?.avatar
-      || RANK_DEFAULT_AVATAR;
+      || genderFallback;
+  }
+  function getRankWorkoutSources(bucket){
+    const sources = [];
+    if(bucket?.workouts && typeof bucket.workouts === "object") sources.push(bucket.workouts);
+    if(state.workouts && typeof state.workouts === "object" && state.workouts !== bucket?.workouts) sources.push(state.workouts);
+    return sources;
+  }
+  function getRankPrSources(bucket){
+    const sources = [];
+    if(bucket?.prs && typeof bucket.prs === "object") sources.push(bucket.prs);
+    if(state.prs && typeof state.prs === "object" && state.prs !== bucket?.prs) sources.push(state.prs);
+    return sources;
   }
   function getRankOwnerFromKey(exKey, fallbackProfile){
     const clean = String(exKey || "");
@@ -2283,29 +2301,34 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   }
   function getBig3Score(profileKey, bucket){
     const best = { squat: 0, bench: 0, deadlift: 0 };
-    Object.keys(bucket?.prs || {}).forEach(prKey=>{
-      const pr = bucket.prs?.[prKey] || {};
-      const participant = String(pr.participant || getRankOwnerFromKey(prKey, profileKey)).toLowerCase();
-      if(participant !== String(profileKey).toLowerCase()) return;
-      const lift = classifyBig3Lift(prKey);
-      if(!lift) return;
-      const weight = parseFloat(pr.weight || 0) || 0;
-      if(weight > best[lift]) best[lift] = weight;
+    const target = String(profileKey).toLowerCase();
+    getRankPrSources(bucket).forEach(prBucket=>{
+      Object.keys(prBucket || {}).forEach(prKey=>{
+        const pr = prBucket?.[prKey] || {};
+        const participant = String(pr.participant || getRankOwnerFromKey(prKey, profileKey)).toLowerCase();
+        if(participant !== target) return;
+        const lift = classifyBig3Lift(prKey);
+        if(!lift) return;
+        const weight = parseFloat(pr.weight || 0) || 0;
+        if(weight > best[lift]) best[lift] = weight;
+      });
     });
-    Object.keys(bucket?.workouts || {}).forEach(ds=>{
-      const dayWorkouts = bucket.workouts?.[ds] || {};
-      Object.keys(dayWorkouts).forEach(dayKey=>{
-        const wo = dayWorkouts?.[dayKey];
-        Object.keys(wo?.exercises || {}).forEach(exKey=>{
-          const owner = getRankOwnerFromKey(exKey, profileKey);
-          if(owner !== String(profileKey).toLowerCase()) return;
-          const entry = wo?.exercises?.[exKey] || {};
-          if(!hasExerciseActivityEntry(entry)) return;
-          const lift = classifyBig3Lift(exKey);
-          if(!lift) return;
-          const coverMax = Array.isArray(entry.coverSets) ? Math.max(0, ...entry.coverSets.map(set=>parseFloat(set?.weight || 0) || 0)) : 0;
-          const weight = Math.max(parseFloat(entry.weight || 0) || 0, coverMax);
-          if(weight > best[lift]) best[lift] = weight;
+    getRankWorkoutSources(bucket).forEach(workouts=>{
+      Object.keys(workouts || {}).forEach(ds=>{
+        const dayWorkouts = workouts?.[ds] || {};
+        Object.keys(dayWorkouts).forEach(dayKey=>{
+          const wo = dayWorkouts?.[dayKey];
+          Object.keys(wo?.exercises || {}).forEach(exKey=>{
+            const owner = getRankOwnerFromKey(exKey, profileKey);
+            if(owner !== target) return;
+            const entry = wo?.exercises?.[exKey] || {};
+            if(!hasExerciseActivityEntry(entry)) return;
+            const lift = classifyBig3Lift(exKey);
+            if(!lift) return;
+            const coverMax = Array.isArray(entry.coverSets) ? Math.max(0, ...entry.coverSets.map(set=>parseFloat(set?.weight || 0) || 0)) : 0;
+            const weight = Math.max(parseFloat(entry.weight || 0) || 0, coverMax);
+            if(weight > best[lift]) best[lift] = weight;
+          });
         });
       });
     });
@@ -2317,24 +2340,27 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     startDate.setDate(startDate.getDate() - (days - 1));
     const cutoff = startDate.toISOString().slice(0,10);
     const activeDays = new Set();
-    Object.keys(bucket?.workouts || {}).forEach(ds=>{
-      if(ds < cutoff || ds > today) return;
-      const dayWorkouts = bucket.workouts?.[ds] || {};
-      let worked = false;
-      Object.keys(dayWorkouts).forEach(dayKey=>{
-        if(worked) return;
-        const wo = dayWorkouts?.[dayKey];
-        if(!wo) return;
-        if(sessionHasActivityForParticipant(wo, dayKey, profileKey)){
-          worked = true;
-          return;
-        }
-        if(wo.done){
-          const hasOwnedEntry = Object.keys(wo.exercises || {}).some(exKey=>getRankOwnerFromKey(exKey, profileKey)===String(profileKey).toLowerCase());
-          if(hasOwnedEntry || !Object.keys(wo.exercises || {}).length) worked = true;
-        }
+    const target = String(profileKey).toLowerCase();
+    getRankWorkoutSources(bucket).forEach(workouts=>{
+      Object.keys(workouts || {}).forEach(ds=>{
+        if(ds < cutoff || ds > today) return;
+        const dayWorkouts = workouts?.[ds] || {};
+        let worked = false;
+        Object.keys(dayWorkouts).forEach(dayKey=>{
+          if(worked) return;
+          const wo = dayWorkouts?.[dayKey];
+          if(!wo) return;
+          if(sessionHasActivityForParticipant(wo, dayKey, profileKey)){
+            worked = true;
+            return;
+          }
+          if(wo.done){
+            const hasOwnedEntry = Object.keys(wo.exercises || {}).some(exKey=>getRankOwnerFromKey(exKey, profileKey)===target);
+            if(hasOwnedEntry || !Object.keys(wo.exercises || {}).length) worked = true;
+          }
+        });
+        if(worked) activeDays.add(ds);
       });
-      if(worked) activeDays.add(ds);
     });
     return activeDays.size;
   }
@@ -2344,24 +2370,27 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     startDate.setDate(startDate.getDate() - (days - 1));
     const cutoff = startDate.toISOString().slice(0,10);
     let tonnage = 0;
-    Object.keys(bucket?.workouts || {}).forEach(ds=>{
-      if(ds < cutoff || ds > today) return;
-      const dayWorkouts = bucket.workouts?.[ds] || {};
-      Object.keys(dayWorkouts).forEach(dayKey=>{
-        const wo = dayWorkouts?.[dayKey];
-        Object.keys(wo?.exercises || {}).forEach(exKey=>{
-          const owner = getRankOwnerFromKey(exKey, profileKey);
-          if(owner !== String(profileKey).toLowerCase()) return;
-          const entry = wo?.exercises?.[exKey] || {};
-          if(!hasExerciseActivityEntry(entry)) return;
-          const coverSets = Array.isArray(entry.coverSets) ? entry.coverSets : [];
-          const coverMax = coverSets.length ? Math.max(0, ...coverSets.map(set=>parseFloat(set?.weight || 0) || 0)) : 0;
-          const weight = Math.max(parseFloat(entry.weight || 0) || 0, coverMax);
-          if(weight <= 0) return;
-          const plannedReps = parseInt((WORKOUT_PLAN?.[dayKey]?.exercises || []).find(ex=>String(ex.name||"").toLowerCase()===stripParticipantPrefix(exKey).toLowerCase())?.reps || 0, 10) || 0;
-          const reps = parseInt(entry.actualReps || 0, 10) || plannedReps || 1;
-          const sets = parseInt(entry.loggedSets || 0, 10) || coverSets.length || (entry.checked ? 1 : 0) || 1;
-          tonnage += weight * Math.max(reps, 1) * Math.max(sets, 1);
+    const target = String(profileKey).toLowerCase();
+    getRankWorkoutSources(bucket).forEach(workouts=>{
+      Object.keys(workouts || {}).forEach(ds=>{
+        if(ds < cutoff || ds > today) return;
+        const dayWorkouts = workouts?.[ds] || {};
+        Object.keys(dayWorkouts).forEach(dayKey=>{
+          const wo = dayWorkouts?.[dayKey];
+          Object.keys(wo?.exercises || {}).forEach(exKey=>{
+            const owner = getRankOwnerFromKey(exKey, profileKey);
+            if(owner !== target) return;
+            const entry = wo?.exercises?.[exKey] || {};
+            if(!hasExerciseActivityEntry(entry)) return;
+            const coverSets = Array.isArray(entry.coverSets) ? entry.coverSets : [];
+            const coverMax = coverSets.length ? Math.max(0, ...coverSets.map(set=>parseFloat(set?.weight || 0) || 0)) : 0;
+            const weight = Math.max(parseFloat(entry.weight || 0) || 0, coverMax);
+            if(weight <= 0) return;
+            const plannedReps = parseInt((WORKOUT_PLAN?.[dayKey]?.exercises || []).find(ex=>String(ex.name||"").toLowerCase()===stripParticipantPrefix(exKey).toLowerCase())?.reps || 0, 10) || 0;
+            const reps = parseInt(entry.actualReps || 0, 10) || plannedReps || 1;
+            const sets = parseInt(entry.loggedSets || 0, 10) || coverSets.length || (entry.checked ? 1 : 0) || 1;
+            tonnage += weight * Math.max(reps, 1) * Math.max(sets, 1);
+          });
         });
       });
     });
@@ -2526,12 +2555,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           <div class="irl-you-score"><strong>${formatRankScore(you.score || 0)}</strong><p>${unit}</p></div>
         </div>
       </div>
-      <nav class="irl-bottom-nav" aria-label="Rank navigation">
-        <button onclick="navTo('workouts')"><span class="material-symbols-outlined">fitness_center</span><em>TRAIN</em></button>
-        <button onclick="navTo('progress')"><span class="material-symbols-outlined">history</span><em>HISTORY</em></button>
-        <button class="active" onclick="navTo('rank')"><span class="material-symbols-outlined">leaderboard</span><em>RANK</em></button>
-        <button onclick="navTo('profile')"><span class="material-symbols-outlined">groups</span><em>SOCIAL</em></button>
-      </nav>
     `;
   }
 
