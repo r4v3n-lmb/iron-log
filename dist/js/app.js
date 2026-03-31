@@ -2764,9 +2764,33 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         const ds = d.toISOString().split("T")[0];
         const entries = getCalendarDayEntries(ds);
         const workoutColor = entries[0]?.day?.color || getCalendarWorkedMeta(ds).otherUserColor || "";
-        days.push({label:labels[i], worked:entries.length>0, count:entries.length, isToday:ds===getTodayStr(), date:ds, entries, workoutColor});
+        days.push({
+          label:labels[i],
+          worked:entries.length>0,
+          count:entries.length,
+          isToday:ds===getTodayStr(),
+          date:ds,
+          dow:d.getDay(), // local weekday (0=Sun..6=Sat) to match WORKOUT_PLAN.weekday
+          entries,
+          workoutColor
+        });
       }
-      const pct = Math.round((days.filter(x=>x.worked).length / days.length) * 100);
+
+      // Weekly consistency % should reflect the user's goal (e.g. 5 days/week),
+      // not "days worked / 7".
+      const plannedWeekdays = new Set(
+        Object.keys(WORKOUT_PLAN||{}).filter(dayKey=>{
+          const def = WORKOUT_PLAN[dayKey] || {};
+          const participants = Array.isArray(def.participants) ? def.participants : [];
+          const weekdayNum = Number(def.weekday);
+          return participants.includes(activeProfile) && Number.isFinite(weekdayNum) && weekdayNum >= 0 && weekdayNum <= 6;
+        }).map(dayKey=>Number(WORKOUT_PLAN[dayKey].weekday))
+      );
+      const goalDays = plannedWeekdays.size || 5; // fallback for safety
+      const workedPlannedDays = plannedWeekdays.size
+        ? days.filter(day=>day.worked && plannedWeekdays.has(day.dow)).length
+        : days.filter(day=>day.worked).length;
+      const pct = goalDays > 0 ? Math.round(Math.min(workedPlannedDays, goalDays) / goalDays * 100) : 0;
       consistencyEl.innerHTML = `
         <div class="dashboard-card-head dashboard-card-head-tight">
           <h3>WEEKLY CONSISTENCY</h3>
