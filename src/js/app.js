@@ -668,6 +668,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(Number.isNaN(parsed) || weekday == null || weekday === "") return "—";
     return ["SUN","MON","TUE","WED","THU","FRI","SAT"][parsed] || "—";
   }
+  function isCardioExerciseName(name){
+    const clean = String(name || "").toLowerCase().trim();
+    return clean.includes("treadmill") || clean.includes("bike") || clean.includes("rowing machine");
+  }
+  function getExerciseMetricUnit(name){
+    return isCardioExerciseName(name) ? "cal" : "kg";
+  }
+  function getExerciseMetricLabel(name){
+    return isCardioExerciseName(name) ? "Calories Burned" : "Weight";
+  }
   function formatWorkoutKeyTitle(key){
     return String(key || "workout").replace(/[_-]+/g," ").replace(/\s+/g," ").trim().toUpperCase();
   }
@@ -3758,19 +3768,25 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const participantCards=activeExercise ? displayedParticipants.map(pp=>{
       const {key:exKey,data:edRaw}=getExData(wo.exercises,pp,activeExercise.name);
       const ed=edRaw||{};
+      const isCardioExercise=isCardioExerciseName(activeExercise.name);
+      const metricUnit=getExerciseMetricUnit(activeExercise.name);
+      const metricLabel=getExerciseMetricLabel(activeExercise.name);
       const skipped=!!ed.skipped;
       const lastWeight=getLastWeight(key,activeExercise.name,pp);
       const lastSession=getLastExerciseSession(key,activeExercise.name,pp);
       const progressInsight=getProgressInsight(key,activeExercise,pp);
       const overloadSuggestion=getOverloadSuggestion(key,activeExercise,pp);
-      const guidanceText = progressInsight?.kind==="next"
+      const guidanceText = isCardioExercise
+        ? "Track total calories burned per set."
+        : progressInsight?.kind==="next"
         ? `${progressInsight.note} · Try ${progressInsight.suggestedWeight}kg`
         : progressInsight?.kind==="plateau"
           ? progressInsight.note
           : overloadSuggestion
             ? `Increase to ${overloadSuggestion.suggestedWeight}kg next session`
             : (lastSession ? "Match or beat last session" : "Log a clean first session");
-      const currentWeight=parseFloat(ed.weight||lastWeight?.weight||20) || 20;
+      const currentWeightDefault=isCardioExercise ? 0 : 20;
+      const currentWeight=parseFloat(ed.weight||lastWeight?.weight||currentWeightDefault) || currentWeightDefault;
       const currentReps=parseInt(ed.actualReps||activeExercise.reps||8,10) || 8;
       const setHistory=Array.isArray(ed.coverSets)?ed.coverSets:[];
       const targetSets=getExerciseTargetSets(activeExercise);
@@ -3784,7 +3800,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <div class="focus-logging-top">
           <div class="focus-stat-mini">
             <span>Last</span>
-            <strong>${lastWeight?.weight || "—"} <em>kg</em></strong>
+            <strong>${lastWeight?.weight || "—"} <em>${metricUnit}</em></strong>
           </div>
           <div class="focus-stat-mini">
             <span>Target</span>
@@ -3797,10 +3813,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         </div>
         <div class="focus-logging-inputs">
           <div class="focus-input-block">
-            <label>Weight</label>
+            <label>${metricLabel}</label>
             <div class="focus-input-shell">
-              <input class="focus-metric-input" type="number" inputmode="decimal" step="0.25" min="0" value="${currentWeight}" ${!isEditable?'disabled':''} onblur="commitActiveWorkoutValue('${key}','${exKey}','weight',this.value,'${currentWeight}')" onkeydown="if(event.key==='Enter'){this.blur();}">
-              <span>kg</span>
+              <input class="focus-metric-input" type="number" inputmode="decimal" step="${isCardioExercise ? "1" : "0.25"}" min="0" value="${currentWeight}" ${!isEditable?'disabled':''} onblur="commitActiveWorkoutValue('${key}','${exKey}','weight',this.value,'${currentWeight}')" onkeydown="if(event.key==='Enter'){this.blur();}">
+              <span>${metricUnit}</span>
             </div>
           </div>
           <div class="focus-input-block">
@@ -3824,13 +3840,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <div class="focus-guidance-grid">
           <div class="focus-guidance-card">
             <span>Last Session</span>
-            <strong>${lastSession ? `${lastSession.weight}kg × ${lastSession.reps}` : "No data yet"}</strong>
+            <strong>${lastSession ? `${lastSession.weight}${metricUnit} × ${lastSession.reps}` : "No data yet"}</strong>
             <em>${lastSession ? lastSession.date : "Start building history"}</em>
           </div>
           <div class="focus-guidance-card accent">
             <span>Next Step</span>
             <strong>${guidanceText}</strong>
-            <em>${getWarmupSuggestion(currentWeight) ? `Warm-up: ${getWarmupSuggestion(currentWeight)}` : "Dial in the first working set"}</em>
+            <em>${isCardioExercise ? "Focus on consistent effort and pace." : (getWarmupSuggestion(currentWeight) ? `Warm-up: ${getWarmupSuggestion(currentWeight)}` : "Dial in the first working set")}</em>
           </div>
         </div>
         <div class="focus-inline-actions">
@@ -4096,12 +4112,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         h+=`<div class="el">`;
         day.exercises.forEach((ex,i)=>{
           const ic=ex.sets===0;
+          const isCardioExercise=isCardioExerciseName(ex.name);
+          const metricUnit=getExerciseMetricUnit(ex.name);
           const displayName=ex.name;
           // Check if any participant hit PR
           const anyPR=participants.some(pp=>{
             const pr=getPRRecord(pp,ex.name);
             const {data:ed}=getExData(wo.exercises,pp,ex.name);
-            return pr?.weight>0&&parseFloat(ed?.weight||0)>=pr.weight&&ed?.checked;
+            return !isCardioExercise&&pr?.weight>0&&parseFloat(ed?.weight||0)>=pr.weight&&ed?.checked;
           });
 
           // Checkbox: checked if ALL participants have checked it (or just show compound state)
@@ -4118,17 +4136,17 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             <div class="participants-cols">
               ${participants.map(pp=>{
                 const {key:exKey,data:_rd}=getExData(wo.exercises,pp,ex.name); const ed=_rd||{checked:false,weight:"",actualReps:""};
-                const lw=ic?null:getLastWeight(key,ex.name,pp);
-                const ol=ic?null:getOverloadSuggestion(key,ex,pp);
-                const pi=ic?null:getProgressInsight(key,ex,pp);
-                const warm=ic?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
+                const lw=ic||isCardioExercise?null:getLastWeight(key,ex.name,pp);
+                const ol=ic||isCardioExercise?null:getOverloadSuggestion(key,ex,pp);
+                const pi=ic||isCardioExercise?null:getProgressInsight(key,ex,pp);
+                const warm=ic||isCardioExercise?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
                 const dis=!isEditable?'disabled':'';
                 const pcolor=PROFILES[pp]?.color||'#888';
                 return `<div class="pcol" style="--pcolor:${pcolor}">
                   <label class="eck"><input type="checkbox" ${ed.checked?'checked':''} ${dis} onchange="togEx('${key}','${exKey}',this.checked)"><span class="ecm" style="--c:${pcolor}"></span></label>
                   ${ic?`<span class="et" style="color:#555">—</span><span class="et" style="color:#555">—</span>`:
                   `<input type="number" class="ari" placeholder="${ex.reps}" value="${ed.actualReps||''}" ${dis} onchange="setReps('${key}','${exKey}',this.value)" onblur="setReps('${key}','${exKey}',this.value)">
-                   <div class="ww"><input type="number" class="wi" placeholder="—" value="${ed.weight||''}" ${dis} onchange="setWt('${key}','${exKey}',this.value,'${pp}')" onblur="setWt('${key}','${exKey}',this.value,'${pp}')"><span class="wu">kg</span></div>`}
+                   <div class="ww"><input type="number" class="wi" placeholder="—" value="${ed.weight||''}" ${dis} onchange="setWt('${key}','${exKey}',this.value,'${pp}')" onblur="setWt('${key}','${exKey}',this.value,'${pp}')"><span class="wu">${metricUnit}</span></div>`}
                   ${ol?`<div class="olb-sm">⬆${ol.suggestedWeight}kg</div>`:lw?`<div class="lwh-sm">↑${lw.weight}kg</div>`:''}
                   ${!ol&&pi?.kind==="next"?`<div class="olb-sm">NEXT ${pi.suggestedWeight}kg</div>`:''}
                   ${pi?.kind==="plateau"?`<div class="plt-sm">PLATEAU</div>`:''}
@@ -4147,25 +4165,27 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           <span class="exhc" style="flex:1">EXERCISE</span>
           <span class="exhc" style="width:60px;text-align:center">TARGET</span>
           <span class="exhc" style="width:60px;text-align:center">ACTUAL</span>
-          <span class="exhc" style="width:70px;text-align:center">WEIGHT</span>
+          <span class="exhc" style="width:70px;text-align:center">METRIC</span>
           <span class="exhc" style="width:28px;text-align:center">⇄</span>
         </div><div class="el">`;
         day.exercises.forEach((ex,i)=>{
           const part=participants[0]||activeProfile;
           const {key:exKey,data:_exd}=getExData(wo.exercises,part,ex.name); const ed=_exd||{checked:false,weight:"",actualReps:""};
           const displayName=ed.customName||ex.name;
+          const isCardioExercise=isCardioExerciseName(ex.name);
+          const metricUnit=getExerciseMetricUnit(ex.name);
           const ic=ex.sets===0;
           const pr=getPRRecord(part,ex.name);
-          const isPR=pr?.weight>0&&parseFloat(ed.weight||0)>=pr.weight&&ed.checked;
+          const isPR=!isCardioExercise&&pr?.weight>0&&parseFloat(ed.weight||0)>=pr.weight&&ed.checked;
           const prb=isPR?`<span class="prb">🏆 PR</span>`:'';
-          const lw=ic?null:getLastWeight(key,ex.name,part);
-          const lwh=lw?`<span class="lwh">↑${lw.weight}kg</span>`:'';
-          const ol=ic?null:getOverloadSuggestion(key,ex,part);
+          const lw=ic||isCardioExercise?null:getLastWeight(key,ex.name,part);
+          const lwh=lw?`<span class="lwh">↑${lw.weight}${metricUnit}</span>`:'';
+          const ol=ic||isCardioExercise?null:getOverloadSuggestion(key,ex,part);
           const olb=ol?`<span class="olb">⬆ Try ${ol.suggestedWeight}kg</span>`:'';
-          const pi=ic?null:getProgressInsight(key,ex,part);
+          const pi=ic||isCardioExercise?null:getProgressInsight(key,ex,part);
           const pib=!ol&&pi?.kind==="next"?`<span class="olb">NEXT ${pi.suggestedWeight}kg</span>`:'';
           const plb=pi?.kind==="plateau"?`<span class="plt">PLATEAU</span>`:'';
-          const warm=ic?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
+          const warm=ic||isCardioExercise?"":getWarmupSuggestion(ed.weight||lw?.weight||0);
           const wup=warm?`<div class="wup">WU ${warm}</div>`:'';
           const dis=!isEditable?'disabled':'';
           const exId=getExerciseAnimId(ex);
@@ -4178,7 +4198,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             </div>
             <span class="et">${ic?ex.reps:`${ex.sets}×${ex.reps}`}</span>
             ${ic?`<span class="et" style="color:#555">—</span>`:`<input type="number" class="ari" placeholder="${ex.reps}" value="${ed.actualReps||''}" ${dis} onchange="setReps('${key}','${exKey}',this.value)" onblur="setReps('${key}','${exKey}',this.value)">`}
-            ${ic?`<span class="et" style="color:#555">—</span>`:`<div class="ww"><input type="number" class="wi" placeholder="—" value="${ed.weight||''}" ${dis} onchange="setWt('${key}','${exKey}',this.value,'${part}')" onblur="setWt('${key}','${exKey}',this.value,'${part}')"><span class="wu">kg</span></div>`}
+            ${ic?`<span class="et" style="color:#555">—</span>`:`<div class="ww"><input type="number" class="wi" placeholder="—" value="${ed.weight||''}" ${dis} onchange="setWt('${key}','${exKey}',this.value,'${part}')" onblur="setWt('${key}','${exKey}',this.value,'${part}')"><span class="wu">${metricUnit}</span></div>`}
             <div class="er-actions">
               <button class="sb" ${dis} onclick="openSwap('${key}',${i})">⇄</button>
               <button class="drh" ${dis} draggable="${!isEditable?'false':'true'}" ondragstart="startExerciseDrag(event,'${key}',${i})" ondragend="endExerciseDrag(event)" title="Hold and drag to reorder">⋮⋮</button>
@@ -4450,7 +4470,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             const displayName=ed.customName||ex.name;
             h_content+=`<div style="padding:4px 0;font-size:0.85em;color:#bbb;display:flex;justify-content:space-between;align-items:center">
               <span>• ${displayName} <span style="color:${pcolor};font-size:.8em">${parts.length>1?PROFILES[pp]?.label:''}</span></span>
-              <span style="color:#aaa;font-family:'Courier New'"><strong>${ed.weight||'—'}</strong>kg ${ed.actualReps||ex.reps}</span>
+              <span style="color:#aaa;font-family:'Courier New'"><strong>${ed.weight||'—'}</strong>${getExerciseMetricUnit(ex.name)} ${ed.actualReps||ex.reps}</span>
             </div>`;
           });
         });
@@ -4759,7 +4779,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const loggedSets = target.coverSets.length;
     target.checked = loggedSets >= targetSets;
     const cleanName=String(exerciseName||"").replace(/'/g,"");
-    if(target.checked && weight>0 && checkPR(exKey,weight,key,activeDate,participant||activeProfile)){
+    const isCardioExercise=isCardioExerciseName(exerciseName);
+    if(!isCardioExercise && target.checked && weight>0 && checkPR(exKey,weight,key,activeDate,participant||activeProfile)){
       toast(`🏆 NEW PR — ${cleanName} @ ${weight}kg!`);
     } else if(target.checked) {
       toast(`✓ ${PROFILES[participant]?.label||participant}: ${cleanName} complete`);
@@ -4858,7 +4879,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const exerciseName = stripParticipantPrefix(exKey);
     const planned = WORKOUT_PLAN[key]?.exercises?.find(ex=>ex.name===exerciseName);
     entry.checked = entry.coverSets.length >= getExerciseTargetSets(planned);
-    if(weight>0 && checkPR(exKey,weight,key,activeDate,participant||activeProfile)){
+    if(weight>0 && !isCardioExerciseName(displayName) && checkPR(exKey,weight,key,activeDate,participant||activeProfile)){
       toast(`🏆 NEW PR — ${displayName} @ ${weight}kg!`);
     } else {
       toast(`✓ ${displayName} logged`);
@@ -4880,7 +4901,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       // Extract participant — new keys are "profile_ExName", old keys are just "ExName"
       const part=exName.includes('_')?exName.split('_')[0]:activeProfile;
       const displayName=stripParticipantPrefix(stripParticipantPrefix(exName));
-      if(w>0&&checkPR(exName,w,key,activeDate,part))toast(`🏆 NEW PR — ${displayName} @ ${w}kg!`);
+      if(!isCardioExerciseName(displayName) && w>0 && checkPR(exName,w,key,activeDate,part)) toast(`🏆 NEW PR — ${displayName} @ ${w}kg!`);
     }
     const sy=window.scrollY; renderDayPanel(key); renderStats(); renderCharts(); renderCalendar(); window.scrollTo(0,sy);
     await saveData();
@@ -4891,7 +4912,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     wo.exercises[exName].weight=val;
     const w=parseFloat(val);
     const displayName=stripParticipantPrefix(stripParticipantPrefix(exName));
-    if(wo.exercises[exName].checked&&w>0&&checkPR(exName,w,key,activeDate,participant||activeProfile))toast(`🏆 NEW PR — ${displayName} @ ${w}kg!`);
+    if(!isCardioExerciseName(displayName) && wo.exercises[exName].checked && w>0 && checkPR(exName,w,key,activeDate,participant||activeProfile)) toast(`🏆 NEW PR — ${displayName} @ ${w}kg!`);
     renderStats(); renderCharts(); await saveData();
   };
   window.setReps=async function(key,exName,val){
