@@ -14,7 +14,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
   const storage = getStorage(app);
-  const APP_VERSION = "v1.1.45";
+  const APP_VERSION = "v1.1.46";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -2788,17 +2788,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 
       // Weekly consistency % should reflect the user's goal (e.g. 5 days/week),
       // not "days worked / 7".
-      const plannedWeekdays = new Set(
-        Object.keys(WORKOUT_PLAN||{}).filter(dayKey=>{
-          const def = WORKOUT_PLAN[dayKey] || {};
-          const participants = Array.isArray(def.participants) ? def.participants : [];
-          const weekdayNum = Number(def.weekday);
-          return participants.includes(activeProfile) && Number.isFinite(weekdayNum) && weekdayNum >= 0 && weekdayNum <= 6;
-        }).map(dayKey=>Number(WORKOUT_PLAN[dayKey].weekday))
-      );
-      const goalDays = plannedWeekdays.size || 5; // fallback for safety
-      const workedPlannedDays = plannedWeekdays.size
-        ? days.filter(day=>day.worked && plannedWeekdays.has(day.dow)).length
+      const plannedWorkoutDays = Object.keys(WORKOUT_PLAN||{}).filter(dayKey=>{
+        const def = WORKOUT_PLAN[dayKey] || {};
+        const participants = Array.isArray(def.participants) ? def.participants : [];
+        const weekdayNum = Number(def.weekday);
+        return participants.includes(activeProfile) && Number.isFinite(weekdayNum) && weekdayNum >= 0 && weekdayNum <= 6;
+      });
+      const plannedWeekdayPool = plannedWorkoutDays.map(dayKey=>Number(WORKOUT_PLAN[dayKey].weekday));
+      const goalDays = plannedWorkoutDays.length || 5; // fallback for safety
+      const workedPlannedDays = plannedWorkoutDays.length
+        ? days.filter(day=>day.worked && plannedWeekdayPool.includes(day.dow)).length
         : days.filter(day=>day.worked).length;
       const pct = goalDays > 0 ? Math.round(Math.min(workedPlannedDays, goalDays) / goalDays * 100) : 0;
       consistencyEl.innerHTML = `
