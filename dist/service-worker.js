@@ -1,4 +1,4 @@
-const APP_VERSION = "v1.1.40";
+const APP_VERSION = "v1.1.45";
 const CACHE_PREFIX = "iron-log-pwa";
 const CACHE_NAME = `${CACHE_PREFIX}-${APP_VERSION}`;
 const APP_SHELL = [

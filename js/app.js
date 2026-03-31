@@ -14,7 +14,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
   const storage = getStorage(app);
-  const APP_VERSION = "v1.1.44";
+  const APP_VERSION = "v1.1.45";
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -5090,11 +5090,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     let h=`<div class="editor-shell">
       <section class="editor-section">
         <div class="editor-grid">
-          <label class="editor-field"><span>DAY SLOT (AUTO)</span><input id="edit-label-input" class="fi" type="text" value="${escAttr(getEditableWorkoutLabel(key))}" readonly></label>
+          <label class="editor-field"><span>DAY SLOT</span><input id="edit-slot-input" class="fi" type="number" min="1" max="${MAX_DAYS}" value="${Math.max(1, getWorkoutOrderValue(key))}"></label>
           <label class="editor-field"><span>WORKOUT TITLE</span><input id="edit-title-input" class="fi" type="text" value="${escAttr(day.title)}" placeholder="e.g. Push"></label>
           <label class="editor-field editor-field-wide"><span>SUBTITLE / MUSCLE GROUPS</span><input id="edit-subtitle-input" class="fi" type="text" value="${escAttr(day.subtitle)}" placeholder="e.g. Chest · Shoulders · Triceps"></label>
           <label class="editor-field"><span>SCHEDULED WEEKDAY</span>
-        <select id="edit-weekday-input" class="fsel" onchange="syncEditDayLabel()">
+        <select id="edit-weekday-input" class="fsel">
           <option value="-1" ${day.weekday==null?'selected':''}>— No fixed day —</option>
           <option value="1" ${day.weekday===1?'selected':''}>Monday</option><option value="2" ${day.weekday===2?'selected':''}>Tuesday</option><option value="3" ${day.weekday===3?'selected':''}>Wednesday</option>
           <option value="4" ${day.weekday===4?'selected':''}>Thursday</option><option value="5" ${day.weekday===5?'selected':''}>Friday</option><option value="6" ${day.weekday===6?'selected':''}>Saturday</option><option value="0" ${day.weekday===0?'selected':''}>Sunday</option>
@@ -5136,15 +5136,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderDayGrid();
     renderAll();
     setMobileSection("workouts");
-  };
-  window.syncEditDayLabel=function(){
-    const modal=document.getElementById("em");
-    const key=modal?.dataset?.key;
-    const labelInput=document.getElementById("edit-label-input");
-    const weekdayInput=document.getElementById("edit-weekday-input");
-    if(!key || !labelInput || !weekdayInput) return;
-    const nextWeekday=parseInt(weekdayInput.value,10);
-    labelInput.value = getProjectedWorkoutDisplayLabel(key, nextWeekday>=0 ? nextWeekday : null);
   };
   window.closeEdit=()=>document.getElementById("em").style.display="none";
   window.addEditRow=function(){
@@ -5207,12 +5198,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   };
   window.saveEdit=async function(){
     const key=document.getElementById("em").dataset.key;
+    const parsedSlot=parseInt(document.getElementById("edit-slot-input")?.value??"",10);
+    const safeSlot=Number.isInteger(parsedSlot)?Math.min(MAX_DAYS,Math.max(1,parsedSlot)):getWorkoutOrderValue(key);
     const newTitle=document.getElementById("edit-title-input").value.trim();
     const newSubtitle=document.getElementById("edit-subtitle-input").value.trim();
     const newNotes=document.getElementById("edit-notes-input").value.trim();
     const newWeekday=parseInt(document.getElementById("edit-weekday-input")?.value??"-1",10);
     const hasBronwen=canManageWorkoutParticipants() ? !!document.getElementById("edit-participants-bronwen")?.checked : (WORKOUT_PLAN[key].participants||[]).includes("bronwen");
     if(!newTitle){toast("⚠️ Enter a title");return;}
+    WORKOUT_PLAN[key].order=safeSlot;
     delete WORKOUT_PLAN[key].label;
     WORKOUT_PLAN[key].title=newTitle;
     WORKOUT_PLAN[key].subtitle=newSubtitle;
