@@ -23,6 +23,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   const APP_VERSION = "v1.1.46";
   let phoneRecaptcha = null;
   let pendingPhoneSignIn = null;
+  let mealLogDateContext = null;
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -2897,6 +2898,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     });
     return { worked, otherUserColor: workoutColor, sourceUser: activeProfile };
   }
+  function getMissedWorkoutEvent(ds, profileKey=activeProfile){
+    const entry = ensureHealthEntry(ds, profileKey);
+    const title = String(entry?.missedEventTitle || "").trim();
+    const reason = String(entry?.missedEventReason || "").trim();
+    if(!title && !reason) return null;
+    return { title, reason };
+  }
 
   window.openWorkoutFromHistory=function(ds,key){
     activeDate = ds;
@@ -3073,13 +3081,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const isT=ds===today,isA=ds===activeDate,isFut=ds>today;
       const visible = getCalendarWorkedMeta(ds);
       const worked = visible.worked;
+      const missedEvent = getMissedWorkoutEvent(ds);
+      const hasMissedEvent = !!missedEvent;
       const otherUserColor = visible.otherUserColor;
       const dc=otherUserColor;
       const bday=isBirthday(ds);
       const outMonth=cellDate.getMonth()!==mo;
-      h+=`<div class="cal-cell ${outMonth?'empty':''} ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''} ${isFut?'future':''} ${bday?'bday':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
+      h+=`<div class="cal-cell ${outMonth?'empty':''} ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''} ${isFut?'future':''} ${bday?'bday':''} ${hasMissedEvent?'event':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
         <span class="cal-n">${cellDate.getDate()}</span>
         ${dc?`<span class="cal-dot" style="background:${dc}"></span>`:''}
+        ${hasMissedEvent?`<span class="cal-evt" title="${escAttr((missedEvent?.title || missedEvent?.reason || "Event").toUpperCase())}">•</span>`:''}
         ${bday?`<span class="cal-bd">🎂</span>`:''}
       </div>`;
     }
@@ -3505,53 +3516,82 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(!calories && !protein) throw new Error("Empty nutrition estimate");
     return { calories, protein, source };
   }
-  window.logMealPrompt=async function(dateStr=getTodayStr()){
+  function applyMealLogEntry(dateStr, food, kcal, proteinG){
     const entry = ensureHealthEntry(dateStr);
-    const food = prompt("What food did you have?", "");
-    if(food===null) return;
-    const cleanFood = String(food || "").trim();
+    entry.protein = Math.max(0, Math.round(Number(entry.protein || 0) + proteinG));
+    entry.meals.push({
+      id:`meal_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      food: String(food || ""),
+      calories: kcal,
+      protein: proteinG
+    });
+    syncHealthCalories(entry);
+  }
+  window.setMealLogMode=function(mode){
+    const manual = document.getElementById("meal-manual-fields");
+    if(manual) manual.style.display = String(mode || "").toLowerCase() === "manual" ? "block" : "none";
+  };
+  function openMealLogModal(dateStr){
+    mealLogDateContext = dateStr || getTodayStr();
+    const modal = document.getElementById("mlm");
+    const foodInput = document.getElementById("meal-food-input");
+    const modeSelect = document.getElementById("meal-estimate-mode");
+    const caloriesInput = document.getElementById("meal-calories-input");
+    const proteinInput = document.getElementById("meal-protein-input");
+    if(foodInput) foodInput.value = "";
+    if(modeSelect) modeSelect.value = "ai";
+    if(caloriesInput) caloriesInput.value = "";
+    if(proteinInput) proteinInput.value = "";
+    window.setMealLogMode("ai");
+    if(modal) modal.style.display = "flex";
+  }
+  window.closeMealLogModal=function(){
+    const modal = document.getElementById("mlm");
+    if(modal) modal.style.display = "none";
+    mealLogDateContext = null;
+  };
+  window.submitMealLog=async function(){
+    const dateStr = mealLogDateContext || getTodayStr();
+    const cleanFood = String(document.getElementById("meal-food-input")?.value || "").trim();
+    const mode = String(document.getElementById("meal-estimate-mode")?.value || "ai").toLowerCase();
     if(!cleanFood){
       toast("⚠️ Enter a food item");
       return;
     }
     let kcal = 0;
     let proteinG = 0;
-    const useAi = confirm("Use AI estimate for calories and protein?");
-    if(useAi){
+    if(mode === "ai"){
       try{
         const estimate = await estimateMealNutritionWithAI(cleanFood);
         kcal = estimate.calories;
         proteinG = estimate.protein;
       }catch(err){
         console.warn("[IronLog] AI meal estimate failed:", err);
+        toast("⚠️ AI estimate failed. Try again or switch to manual.");
+        return;
       }
-    }
-    if(!kcal){
-      const calories = prompt(`Rough calories for "${cleanFood}"`, "");
-      if(calories===null) return;
-      kcal = Math.max(0, Math.round(Number(calories || 0)));
+      if(!kcal && !proteinG){
+        toast("⚠️ AI returned empty estimate.");
+        return;
+      }
+    } else {
+      kcal = Math.max(0, Math.round(Number(document.getElementById("meal-calories-input")?.value || 0)));
+      proteinG = Math.max(0, Math.round(Number(document.getElementById("meal-protein-input")?.value || 0)));
       if(!kcal){
         toast("⚠️ Enter calories");
         return;
       }
     }
-    if(!proteinG){
-      const proteinInput = prompt(`Protein grams for "${cleanFood}" (optional)`, "");
-      if(proteinInput!==null) proteinG = Math.max(0, Math.round(Number(proteinInput || 0)));
-    }
-    entry.protein = Math.max(0, Math.round(Number(entry.protein || 0) + proteinG));
-    entry.meals.push({
-      id:`meal_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
-      food: cleanFood,
-      calories: kcal,
-      protein: proteinG
-    });
-    syncHealthCalories(entry);
+    applyMealLogEntry(dateStr, cleanFood, kcal, proteinG);
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
     await persistHealthEntryMirror(dateStr);
+    window.closeMealLogModal();
     toast(`🍽 ${cleanFood} logged (${kcal} kcal, ${proteinG}g protein)`);
+  };
+  window.logMealPrompt=async function(dateStr=getTodayStr()){
+    openMealLogModal(dateStr);
   };
   window.removeMealEntry=async function(dateStr, mealId){
     const entry = ensureHealthEntry(dateStr);
@@ -3610,6 +3650,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(typeof entry.soreness !== "number") entry.soreness = Number(entry.soreness || 0);
     if(typeof entry.creatine !== "boolean") entry.creatine = !!entry.creatine;
     if(typeof entry.aminos !== "boolean") entry.aminos = !!entry.aminos;
+    if(typeof entry.missedEventTitle !== "string") entry.missedEventTitle = String(entry.missedEventTitle || "");
+    if(typeof entry.missedEventReason !== "string") entry.missedEventReason = String(entry.missedEventReason || "");
     if(!Array.isArray(entry.meals)) entry.meals = [];
     entry.meals = entry.meals.map(meal=>({
       ...meal,
@@ -4821,8 +4863,25 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const el = document.getElementById("history-selected-session");
     if(!el) return;
     const entries = getCalendarDayEntries(ds);
+    const missedEvent = getMissedWorkoutEvent(ds);
     const dayName = formatHistoryDayName(ds);
     const title = new Date(`${ds}T12:00:00`).toLocaleDateString("en-ZA",{month:"long",day:"numeric"}).toUpperCase();
+    const eventCard = missedEvent ? `
+      <article class="history-session-card history-event-card">
+        <div class="history-session-body">
+          <div class="history-session-head">
+            <div>
+              <div class="history-session-title">MISSED WORKOUT EVENT</div>
+              <div class="history-session-time"><span class="material-symbols-outlined">event_note</span>${missedEvent.title || "Planned event"}</div>
+            </div>
+            <div class="history-session-actions">
+              <button type="button" aria-label="Edit event" onclick="openCalendarDayModal('${ds}')"><span class="material-symbols-outlined">edit</span></button>
+            </div>
+          </div>
+          ${missedEvent.reason ? `<div class="calendar-day-entry-copy"><p>${escHtml(missedEvent.reason)}</p></div>` : ""}
+        </div>
+      </article>
+    ` : "";
     const cards = entries.length ? entries.map(entry=>`
       <article class="history-session-card" style="border-left-color:${entry.day.color}">
         <div class="history-session-body">
@@ -4861,8 +4920,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           <span class="history-selected-kicker">Selected Session</span>
           <div class="history-selected-title">${title}</div>
         </div>
-        <div class="history-selected-dayname">${dayName}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="history-selected-dayname">${dayName}</div>
+          <button type="button" class="history-day-event-btn" onclick="openCalendarDayModal('${ds}')">DAY EVENT</button>
+        </div>
       </div>
+      ${eventCard}
       ${cards}
     `;
   }
@@ -4904,9 +4967,80 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       </div>
     `;
   }
+  window.openCalendarDayModal=function(ds=activeDate){
+    const modal = document.getElementById("calendar-day-modal");
+    const titleEl = document.getElementById("calendar-day-modal-title");
+    const bodyEl = document.getElementById("calendar-day-modal-body");
+    if(!modal || !titleEl || !bodyEl) return;
+    const dateStr = String(ds || activeDate || getTodayStr());
+    const event = getMissedWorkoutEvent(dateStr);
+    const entries = getCalendarDayEntries(dateStr);
+    titleEl.textContent = `DAY DETAILS · ${formatDate(dateStr)}`;
+    bodyEl.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px;padding:2px 0 8px">
+        <div class="fl">NON-WORKOUT EVENT TITLE</div>
+        <input id="calendar-event-title" class="fi" placeholder="e.g. Blood donation" value="${escAttr(event?.title || "")}">
+        <div class="fl">REASON / NOTES</div>
+        <textarea id="calendar-event-reason" class="fi" style="min-height:86px;resize:vertical" placeholder="Why you missed training on this day">${escHtml(event?.reason || "")}</textarea>
+        <div style="display:flex;gap:8px">
+          <button class="msc" type="button" onclick="saveCalendarDayEvent('${dateStr}')">SAVE EVENT</button>
+          <button class="mcc" type="button" onclick="removeCalendarDayEvent('${dateStr}')">CLEAR EVENT</button>
+        </div>
+      </div>
+      <div style="border-top:1px solid rgba(255,255,255,.08);padding-top:10px;display:flex;flex-direction:column;gap:8px">
+        <div class="fl">WORKOUTS LOGGED FOR THIS DATE</div>
+        ${entries.length ? entries.map(entry=>`
+          <div class="calendar-day-entry" style="border-left-color:${entry.day.color}">
+            <div class="calendar-day-entry-head">
+              <strong>${entry.day.title}</strong>
+              <span>${entry.tonnage.toLocaleString()} KG</span>
+            </div>
+            <div class="calendar-day-entry-meta">${entry.exercises} exercises · ${entry.timeLabel}</div>
+          </div>
+        `).join("") : `<div class="history-empty-card" style="margin:0">No workouts logged for this date.</div>`}
+      </div>
+    `;
+    modal.style.display = "flex";
+  };
   window.closeCalendarDayModal=function(){
     const modal = document.getElementById("calendar-day-modal");
     if(modal) modal.style.display = "none";
+  };
+  window.saveCalendarDayEvent=async function(ds){
+    const dateStr = String(ds || activeDate || getTodayStr());
+    const title = String(document.getElementById("calendar-event-title")?.value || "").trim();
+    const reason = String(document.getElementById("calendar-event-reason")?.value || "").trim();
+    if(!title && !reason){
+      toast("⚠️ Enter an event title or reason");
+      return;
+    }
+    const entry = ensureHealthEntry(dateStr);
+    entry.missedEventTitle = title;
+    entry.missedEventReason = reason;
+    await saveData();
+    await persistHealthEntryMirror(dateStr);
+    renderCalendar();
+    renderHistorySelectedSession(dateStr);
+    renderHistoryMonthSummary(dateStr);
+    toast("✓ Day event saved");
+    window.closeCalendarDayModal();
+  };
+  window.removeCalendarDayEvent=async function(ds){
+    const dateStr = String(ds || activeDate || getTodayStr());
+    const entry = ensureHealthEntry(dateStr);
+    if(!entry.missedEventTitle && !entry.missedEventReason){
+      toast("No day event to clear");
+      return;
+    }
+    entry.missedEventTitle = "";
+    entry.missedEventReason = "";
+    await saveData();
+    await persistHealthEntryMirror(dateStr);
+    renderCalendar();
+    renderHistorySelectedSession(dateStr);
+    renderHistoryMonthSummary(dateStr);
+    toast("✓ Day event cleared");
+    window.closeCalendarDayModal();
   };
   window.openCalendarDayWorkout=function(ds,key){
     activeDate = ds;
