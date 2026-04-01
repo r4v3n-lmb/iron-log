@@ -52,7 +52,16 @@ exports.estimateMealNutrition = onCall(
     }
 
     const fallback = fallbackEstimate(meal);
-    const apiKey = GEMINI_API_KEY.value();
+    let apiKey = "";
+    try {
+      apiKey = GEMINI_API_KEY.value();
+    } catch (error) {
+      logger.error(
+        "Failed to access GEMINI_API_KEY from Secret Manager. Using fallback estimate.",
+        error
+      );
+      return fallback;
+    }
     if (!apiKey) {
       logger.warn("GEMINI_API_KEY is not configured. Using fallback estimate.");
       return fallback;
