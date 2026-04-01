@@ -2951,10 +2951,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().split("T")[0];
         const entries = getCalendarDayEntries(ds);
+        const missedEvent = getMissedWorkoutEvent(ds);
         const workoutColor = entries[0]?.day?.color || getCalendarWorkedMeta(ds).otherUserColor || "";
         days.push({
           label:labels[i],
           worked:entries.length>0,
+          missed:entries.length===0 && !!missedEvent,
           count:entries.length,
           isToday:ds===getTodayStr(),
           date:ds,
@@ -2985,7 +2987,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         </div>
         <div class="consistency-bars">
           ${days.map(day=>`
-            <button class="consistency-pill ${day.worked ? "done" : ""} ${day.isToday ? "today" : ""}" ${day.workoutColor ? `style="--pill-workout:${day.workoutColor}"` : ""} onclick="navTo('progress');selectDate('${day.date}')">
+            <button class="consistency-pill ${day.worked ? "done" : ""} ${day.missed ? "missed" : ""} ${day.isToday ? "today" : ""}" ${day.workoutColor ? `style="--pill-workout:${day.workoutColor}"` : ""} onclick="navTo('progress');selectDate('${day.date}')">
               <strong>${day.label}</strong>
               <em>${day.count || 0}</em>
             </button>
@@ -4977,17 +4979,17 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const entries = getCalendarDayEntries(dateStr);
     titleEl.textContent = `DAY DETAILS · ${formatDate(dateStr)}`;
     bodyEl.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:8px;padding:2px 0 8px">
+      <div class="calendar-event-form">
         <div class="fl">NON-WORKOUT EVENT TITLE</div>
         <input id="calendar-event-title" class="fi" placeholder="e.g. Blood donation" value="${escAttr(event?.title || "")}">
         <div class="fl">REASON / NOTES</div>
         <textarea id="calendar-event-reason" class="fi" style="min-height:86px;resize:vertical" placeholder="Why you missed training on this day">${escHtml(event?.reason || "")}</textarea>
-        <div style="display:flex;gap:8px">
+        <div class="calendar-event-actions">
           <button class="msc" type="button" onclick="saveCalendarDayEvent('${dateStr}')">SAVE EVENT</button>
           <button class="mcc" type="button" onclick="removeCalendarDayEvent('${dateStr}')">CLEAR EVENT</button>
         </div>
       </div>
-      <div style="border-top:1px solid rgba(255,255,255,.08);padding-top:10px;display:flex;flex-direction:column;gap:8px">
+      <div class="calendar-day-summary">
         <div class="fl">WORKOUTS LOGGED FOR THIS DATE</div>
         ${entries.length ? entries.map(entry=>`
           <div class="calendar-day-entry" style="border-left-color:${entry.day.color}">
