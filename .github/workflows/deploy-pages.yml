@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: read
 
@@ -18,10 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -32,10 +35,13 @@ jobs:
       - name: Build PWA site
         run: npm run build
 
+      - name: Write Firebase service account key
+        run: |
+          cat > "$RUNNER_TEMP/firebase-sa.json" <<'JSON'
+          ${{ secrets.FIREBASE_SERVICE_ACCOUNT_IRONLOG_V1 }}
+          JSON
+
       - name: Deploy to Firebase Hosting (live)
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_IRONLOG_V1 }}
-          projectId: ironlog-v1
-          channelId: live
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
+        run: npx firebase deploy --project ironlog-v1 --only hosting:ironlog-v1
