@@ -1,7 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getFirestore, doc, setDoc, getDoc, getDocFromServer, onSnapshot, deleteField, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-  import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+  import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
   import { getAnalytics, isSupported as analyticsIsSupported } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, signOut as firebaseSignOut, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDwkvvVwJbk3JC_ddej74sFOxgPBl2ccE8",
@@ -16,7 +18,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   analyticsIsSupported().then((supported)=>{ if(supported) getAnalytics(app); }).catch(()=>{});
   const db = getFirestore(app);
   const storage = getStorage(app);
+  const auth = getAuth(app);
+  const functionsClient = getFunctions(app);
   const APP_VERSION = "v1.1.46";
+  let phoneRecaptcha = null;
+  let pendingPhoneSignIn = null;
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -348,10 +354,70 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     // Overwrite the full users map so deleted accounts are truly removed.
     await setDoc(doc(db,"ironlog",ACCOUNTS_DOC),{users:accountRegistry});
   }
+  function normalizeEmail(email){
+    return String(email||"").trim().toLowerCase();
+  }
+  function normalizePhoneE164(raw){
+    const input = String(raw || "").trim();
+    if(!input) return "";
+    const cleaned = input.replace(/[^\d+]/g,"");
+    if(!cleaned.startsWith("+")) return "";
+    if(!/^\+\d{8,15}$/.test(cleaned)) return "";
+    return cleaned;
+  }
+  function findProfileByAuthIdentity(user){
+    if(!user || typeof user !== "object") return "";
+    const uid = String(user.uid || "");
+    const email = normalizeEmail(user.email || "");
+    const phone = normalizePhoneE164(user.phoneNumber || "");
+    return Object.keys(accountRegistry || {}).find(pk=>{
+      const acct = accountRegistry[pk] || {};
+      return (
+        (uid && acct.authUid === uid) ||
+        (email && normalizeEmail(acct.email || "") === email) ||
+        (phone && normalizePhoneE164(acct.phoneE164 || "") === phone)
+      );
+    }) || "";
+  }
+  async function persistAuthLink(pk, user){
+    if(!pk || !accountRegistry?.[pk] || !user) return;
+    const acct = accountRegistry[pk];
+    const nextUid = String(user.uid || "");
+    const nextEmail = normalizeEmail(user.email || acct.email || "");
+    const nextPhone = normalizePhoneE164(user.phoneNumber || acct.phoneE164 || "");
+    const changed = acct.authUid !== nextUid || acct.email !== nextEmail || acct.phoneE164 !== nextPhone;
+    if(!changed) return;
+    accountRegistry[pk] = {
+      ...acct,
+      ...(nextUid ? { authUid: nextUid } : {}),
+      ...(nextEmail ? { email: nextEmail } : {}),
+      ...(nextPhone ? { phoneE164: nextPhone } : {})
+    };
+    await persistAccounts();
+  }
+  function getStorageOwnerId(profileKey=activeProfile){
+    const linkedUid = accountRegistry?.[profileKey]?.authUid;
+    if(linkedUid) return String(linkedUid);
+    if(auth?.currentUser?.uid) return String(auth.currentUser.uid);
+    return String(profileKey || "anon");
+  }
   function showAuthError(msg){
     const el=document.getElementById("auth-msg");
     if(el) el.textContent=msg||"";
   }
+  window.setAuthSignInMethod=function(method){
+    const next = String(method || "pin").toLowerCase();
+    const groups = {
+      pin: document.getElementById("auth-signin-pin-group"),
+      email: document.getElementById("auth-signin-email-group"),
+      phone: document.getElementById("auth-signin-phone-group"),
+      sms: document.getElementById("auth-signin-sms-group")
+    };
+    Object.values(groups).forEach((el)=>{
+      if(el) el.style.display = "none";
+    });
+    if(groups[next]) groups[next].style.display = "block";
+  };
   window.showAuthMode=function(mode){
     const home=document.getElementById("auth-home");
     const grid=document.getElementById("auth-grid");
@@ -363,6 +429,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       grid.style.display="grid";
       signIn.style.display="block";
       signUp.style.display="none";
+      const methodSel=document.getElementById("auth-signin-method");
+      const method = String(methodSel?.value || "pin");
+      if(methodSel) methodSel.value = method;
+      window.setAuthSignInMethod(method);
     } else if(mode==="signup"){
       home.style.display="none";
       grid.style.display="grid";
@@ -408,6 +478,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   };
   async function finalizeSignedInUser(pk){
     if(!PROFILES[pk]) return;
+    if(auth?.currentUser){
+      try{ await persistAuthLink(pk, auth.currentUser); }catch(_e){}
+    }
     activeProfile=pk;
     localStorage.setItem("ironlog_profile",pk);
     normalizeHealthStore();
@@ -436,19 +509,110 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(pinEl) pinEl.value="";
     await finalizeSignedInUser(pk);
   };
+  window.signInWithEmailPassword=async function(){
+    const email = normalizeEmail(document.getElementById("auth-email")?.value || "");
+    const password = String(document.getElementById("auth-password")?.value || "");
+    if(!email){ showAuthError("Enter email"); return; }
+    if(!password){ showAuthError("Enter password"); return; }
+    try{
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const profileKey = findProfileByAuthIdentity(cred.user);
+      if(!profileKey){
+        showAuthError("No profile linked to this account");
+        return;
+      }
+      showAuthError("");
+      await finalizeSignedInUser(profileKey);
+    }catch(err){
+      console.error("[IronLog] email sign-in failed:", err);
+      showAuthError("Email sign-in failed");
+    }
+  };
+  function getPhoneRecaptcha(){
+    if(phoneRecaptcha) return phoneRecaptcha;
+    phoneRecaptcha = new RecaptchaVerifier(auth, "auth-recaptcha", { size: "invisible" });
+    return phoneRecaptcha;
+  }
+  window.sendPhoneVerificationCode=async function(){
+    const sel=document.getElementById("auth-user-select");
+    const selectedProfile = sel?.value || "";
+    const inputPhone = normalizePhoneE164(document.getElementById("auth-phone")?.value || "");
+    const profilePhone = normalizePhoneE164(accountRegistry?.[selectedProfile]?.phoneE164 || "");
+    const phone = inputPhone || profilePhone;
+    if(!phone){ showAuthError("Enter a phone number in +country format"); return; }
+    if(selectedProfile && profilePhone && phone !== profilePhone){
+      showAuthError("Phone does not match selected profile");
+      return;
+    }
+    try{
+      const confirmation = await signInWithPhoneNumber(auth, phone, getPhoneRecaptcha());
+      pendingPhoneSignIn = { confirmation, profileKey: selectedProfile, phone };
+      const methodSel = document.getElementById("auth-signin-method");
+      if(methodSel) methodSel.value = "sms";
+      window.setAuthSignInMethod("sms");
+      showAuthError("SMS code sent. Enter code and verify.");
+    }catch(err){
+      console.error("[IronLog] phone code send failed:", err);
+      showAuthError("Could not send phone code");
+    }
+  };
+  window.verifyPhoneVerificationCode=async function(){
+    const code = String(document.getElementById("auth-phone-code")?.value || "").trim();
+    if(!pendingPhoneSignIn?.confirmation){ showAuthError("Send code first"); return; }
+    if(!code){ showAuthError("Enter SMS code"); return; }
+    try{
+      const cred = await pendingPhoneSignIn.confirmation.confirm(code);
+      const linked = findProfileByAuthIdentity(cred.user);
+      const profileKey = linked || pendingPhoneSignIn.profileKey;
+      if(!profileKey || !accountRegistry?.[profileKey]){
+        showAuthError("No profile linked to this phone");
+        return;
+      }
+      await persistAuthLink(profileKey, cred.user);
+      pendingPhoneSignIn = null;
+      showAuthError("");
+      await finalizeSignedInUser(profileKey);
+    }catch(err){
+      console.error("[IronLog] phone verify failed:", err);
+      showAuthError("Invalid verification code");
+    }
+  };
   window.signUpAccount=async function(){
     const name=(document.getElementById("signup-name")?.value||"").trim();
     const pin=(document.getElementById("signup-pin")?.value||"").trim();
+    const email=normalizeEmail(document.getElementById("signup-email")?.value||"");
+    const password=String(document.getElementById("signup-password")?.value||"");
+    const phoneE164=normalizePhoneE164(document.getElementById("signup-phone")?.value||"");
     const height=parseFloat(document.getElementById("signup-height")?.value||0);
     const color=(document.getElementById("signup-color")?.value||"").trim()||"#4361ee";
     const water=parseFloat(document.getElementById("signup-water")?.value||2.5) || 2.5;
     const protein=parseFloat(document.getElementById("signup-protein")?.value||120) || 120;
     if(!name){ showAuthError("Enter a name"); return; }
     if(!pin){ showAuthError("Enter a PIN"); return; }
+    if(email && !password){ showAuthError("Enter password for email sign-up"); return; }
+    if(password && password.length < 6){ showAuthError("Password must be at least 6 chars"); return; }
+    if(!email && password){ showAuthError("Enter email for password sign-up"); return; }
+    if(String(document.getElementById("signup-phone")?.value||"").trim() && !phoneE164){ showAuthError("Phone must be +country format"); return; }
     if(!Number.isFinite(height) || height<120 || height>230){ showAuthError("Height must be 120-230 cm"); return; }
     const pk=toProfileKey(name);
     if(!pk){ showAuthError("Invalid name"); return; }
     if(accountRegistry[pk]){ showAuthError("A user with that name already exists"); return; }
+    const duplicateEmail = email && Object.values(accountRegistry||{}).some(acct=>normalizeEmail(acct?.email||"")===email);
+    if(duplicateEmail){ showAuthError("Email already linked to another profile"); return; }
+    const duplicatePhone = phoneE164 && Object.values(accountRegistry||{}).some(acct=>normalizePhoneE164(acct?.phoneE164||"")===phoneE164);
+    if(duplicatePhone){ showAuthError("Phone already linked to another profile"); return; }
+    let firebaseUser = null;
+    if(email && password){
+      try{
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        firebaseUser = cred.user;
+        try{ await updateProfile(firebaseUser, { displayName: name }); }catch(_e){}
+      }catch(err){
+        console.error("[IronLog] email sign-up failed:", err);
+        showAuthError("Email sign-up failed");
+        return;
+      }
+    }
     accountRegistry[pk]={
       name,
       pinHash:await hashPinForProfile(pk, pin),
@@ -458,6 +622,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       protein,
       weighMode:"daily",
       birthday:null,
+      ...(email?{email}:{}),
+      ...(phoneE164?{phoneE164}:{}),
+      ...(firebaseUser?.uid?{authUid:firebaseUser.uid}:{}),
       createdAt:new Date().toISOString()
     };
     await persistAccounts();
@@ -467,6 +634,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     await finalizeSignedInUser(pk);
   };
   window.signOutAccount=function(){
+    firebaseSignOut(auth).catch(()=>{});
     const u=new URL(window.location.href);
     u.searchParams.set("v", APP_VERSION);
     u.searchParams.set("t", String(Date.now()));
@@ -3077,7 +3245,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const initials=String(profileName||activeProfile).trim().split(/\s+/).map(part=>part[0]||"").join("").slice(0,2).toUpperCase() || "IL";
     const mealMarkup = meals.length ? meals.slice().reverse().map(meal=>`
       <div class="profile-meal-row">
-        <div><strong>${meal.food}</strong><span>${meal.calories} KCAL</span></div>
+        <div><strong>${meal.food}</strong><span>${meal.calories} KCAL · ${Math.max(0, Number(meal.protein||0))}G PROTEIN</span></div>
         ${meal.locked ? `<em>LEGACY</em>` : `<button onclick="removeMealEntry('${today}','${meal.id}')"><span class="material-symbols-outlined">delete</span></button>`}
       </div>
     `).join("") : `<div class="profile-meal-empty">No meals logged today yet.</div>`;
@@ -3190,7 +3358,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       if(!state.userOverrides) state.userOverrides={};
       const cur=state.userOverrides[activeProfile]||{};
       const cleanName=String(file.name||"avatar").replace(/[^a-zA-Z0-9._-]/g,"_");
-      const path=`avatars/${activeProfile}/${Date.now()}_${cleanName}`;
+      const path=`avatars/${getStorageOwnerId(activeProfile)}/${Date.now()}_${cleanName}`;
       const avatarRef=storageRef(storage, path);
       await uploadBytes(avatarRef, file, { contentType: file.type || "image/jpeg" });
       const downloadUrl=await getDownloadURL(avatarRef);
@@ -3244,25 +3412,45 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.handleVisualProgressUpload=function(event){
     const files=Array.from(event.target?.files||[]);
     if(!files.length) return;
-    Promise.all(files.map(file=>new Promise(resolve=>{
-      const reader=new FileReader();
-      reader.onload=()=>resolve({
+    Promise.all(files.map(async file=>{
+      if(!String(file.type||"").startsWith("image/")) return null;
+      const cleanName=String(file.name||"progress.jpg").replace(/[^a-zA-Z0-9._-]/g,"_");
+      const storagePath=`progress/${getStorageOwnerId(activeProfile)}/${Date.now()}_${cleanName}`;
+      const fileRef=storageRef(storage, storagePath);
+      await uploadBytes(fileRef, file, { contentType: file.type || "image/jpeg" });
+      const src=await getDownloadURL(fileRef);
+      return {
         id:`photo_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
-        src:String(reader.result||""),
+        src:String(src||""),
+        storagePath,
         date:getTodayStr(),
         label:getTodayStr()===(getTodayStr())?"TODAY":formatVisualProgressLabel(getTodayStr())
-      });
-      reader.readAsDataURL(file);
-    }))).then(async photos=>{
-      state.visualProgress=[...photos,...(Array.isArray(state.visualProgress)?state.visualProgress:[])].slice(0,12);
+      };
+    })).then(async photos=>{
+      const valid=photos.filter(Boolean);
+      if(!valid.length){
+        toast("⚠️ No valid images selected");
+        return;
+      }
+      state.visualProgress=[...valid,...(Array.isArray(state.visualProgress)?state.visualProgress:[])].slice(0,12);
       renderVisualProgressGallery();
       await saveData();
-      toast(`✓ Added ${photos.length} progress photo${photos.length===1?"":"s"}`);
+      toast(`✓ Added ${valid.length} progress photo${valid.length===1?"":"s"}`);
+    }).catch(err=>{
+      console.error("[IronLog] visual upload failed:", err);
+      toast("⚠️ Progress upload failed. Check Storage rules.");
     });
     event.target.value="";
   };
   window.removeVisualProgressPhoto=async function(id){
-    state.visualProgress=(Array.isArray(state.visualProgress)?state.visualProgress:[]).filter(photo=>photo.id!==id);
+    const current = Array.isArray(state.visualProgress) ? state.visualProgress : [];
+    const target = current.find(photo=>photo.id===id);
+    if(target?.storagePath){
+      try{
+        await deleteObject(storageRef(storage, target.storagePath));
+      }catch(_e){}
+    }
+    state.visualProgress=current.filter(photo=>photo.id!==id);
     renderVisualProgressGallery();
     await saveData();
   };
@@ -3299,6 +3487,24 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     await logMealPrompt();
     renderProfileShell();
   };
+  async function estimateMealNutritionWithAI(mealText){
+    const callable = httpsCallable(functionsClient, "estimateMealNutrition");
+    const profile = PROFILES?.[activeProfile] || {};
+    const result = await callable({
+      meal: String(mealText || ""),
+      profile: {
+        heightCm: Number(profile.height || 0) || null,
+        waterTargetL: Number(profile.water || 0) || null,
+        proteinTargetG: Number(profile.protein || 0) || null
+      }
+    });
+    const payload = result?.data || {};
+    const calories = Math.max(0, Math.round(Number(payload.calories || 0)));
+    const protein = Math.max(0, Math.round(Number(payload.protein || 0)));
+    const source = payload?.source === "ai" ? "ai" : "fallback";
+    if(!calories && !protein) throw new Error("Empty nutrition estimate");
+    return { calories, protein, source };
+  }
   window.logMealPrompt=async function(dateStr=getTodayStr()){
     const entry = ensureHealthEntry(dateStr);
     const food = prompt("What food did you have?", "");
@@ -3308,31 +3514,56 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       toast("⚠️ Enter a food item");
       return;
     }
-    const calories = prompt(`Rough calories for "${cleanFood}"`, "");
-    if(calories===null) return;
-    const kcal = Math.max(0, Math.round(Number(calories || 0)));
-    if(!kcal){
-      toast("⚠️ Enter calories");
-      return;
+    let kcal = 0;
+    let proteinG = 0;
+    const useAi = confirm("Use AI estimate for calories and protein?");
+    if(useAi){
+      try{
+        const estimate = await estimateMealNutritionWithAI(cleanFood);
+        kcal = estimate.calories;
+        proteinG = estimate.protein;
+      }catch(err){
+        console.warn("[IronLog] AI meal estimate failed:", err);
+      }
     }
+    if(!kcal){
+      const calories = prompt(`Rough calories for "${cleanFood}"`, "");
+      if(calories===null) return;
+      kcal = Math.max(0, Math.round(Number(calories || 0)));
+      if(!kcal){
+        toast("⚠️ Enter calories");
+        return;
+      }
+    }
+    if(!proteinG){
+      const proteinInput = prompt(`Protein grams for "${cleanFood}" (optional)`, "");
+      if(proteinInput!==null) proteinG = Math.max(0, Math.round(Number(proteinInput || 0)));
+    }
+    entry.protein = Math.max(0, Math.round(Number(entry.protein || 0) + proteinG));
     entry.meals.push({
       id:`meal_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
       food: cleanFood,
-      calories: kcal
+      calories: kcal,
+      protein: proteinG
     });
     syncHealthCalories(entry);
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
-    toast(`🍽 ${cleanFood} logged`);
+    await persistHealthEntryMirror(dateStr);
+    toast(`🍽 ${cleanFood} logged (${kcal} kcal, ${proteinG}g protein)`);
   };
   window.removeMealEntry=async function(dateStr, mealId){
     const entry = ensureHealthEntry(dateStr);
+    const target = (entry.meals || []).find(meal=>meal?.id === mealId);
+    const proteinDelta = Math.max(0, Number(target?.protein || 0));
+    entry.protein = Math.max(0, Number(entry.protein || 0) - proteinDelta);
     entry.meals = (entry.meals || []).filter(meal=>meal?.id !== mealId || meal?.locked);
     syncHealthCalories(entry);
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
+    await persistHealthEntryMirror(dateStr);
   };
   function isDateKey(v){
     return /^\d{4}-\d{2}-\d{2}$/.test(String(v||""));
@@ -3380,6 +3611,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(typeof entry.creatine !== "boolean") entry.creatine = !!entry.creatine;
     if(typeof entry.aminos !== "boolean") entry.aminos = !!entry.aminos;
     if(!Array.isArray(entry.meals)) entry.meals = [];
+    entry.meals = entry.meals.map(meal=>({
+      ...meal,
+      calories: Math.max(0, Math.round(Number(meal?.calories || 0))),
+      protein: Math.max(0, Math.round(Number(meal?.protein || 0)))
+    }));
     if(entry.calories > 0 && entry.meals.length === 0 && !entry._legacyCaloriesMigrated){
       entry.meals = [{
         id:`legacy_${dateStr}`,
@@ -3403,6 +3639,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     entry.calories = getHealthCalories(entry);
     return entry.calories;
   }
+  async function persistHealthEntryMirror(dateStr, profileKey=activeProfile){
+    try{
+      const ownerId = getStorageOwnerId(profileKey);
+      const entry = ensureHealthEntry(dateStr, profileKey);
+      await setDoc(
+        doc(db, "ironlog_profiles", ownerId, "health", dateStr),
+        { ...deepCopy(entry), profileKey, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    }catch(err){
+      console.warn("[IronLog] health mirror write failed:", err);
+    }
+  }
   function getMealsForDate(dateStr=getTodayStr(), profileKey=activeProfile){
     return ensureHealthEntry(dateStr, profileKey).meals || [];
   }
@@ -3421,6 +3670,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
+    await persistHealthEntryMirror(t);
   };
   window.previewSleep=function(v){
     const t=getTodayStr();
@@ -3454,6 +3704,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
+    await persistHealthEntryMirror(t);
   };
   window.togHealth=async function(k){
     const t=getTodayStr();
@@ -3462,6 +3713,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
+    await persistHealthEntryMirror(t);
   };
 
   // ─── VOLUME BY MUSCLE GROUP ───

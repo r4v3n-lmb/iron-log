@@ -405,6 +405,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const el=document.getElementById("auth-msg");
     if(el) el.textContent=msg||"";
   }
+  window.setAuthSignInMethod=function(method){
+    const next = String(method || "pin").toLowerCase();
+    const groups = {
+      pin: document.getElementById("auth-signin-pin-group"),
+      email: document.getElementById("auth-signin-email-group"),
+      phone: document.getElementById("auth-signin-phone-group"),
+      sms: document.getElementById("auth-signin-sms-group")
+    };
+    Object.values(groups).forEach((el)=>{
+      if(el) el.style.display = "none";
+    });
+    if(groups[next]) groups[next].style.display = "block";
+  };
   window.showAuthMode=function(mode){
     const home=document.getElementById("auth-home");
     const grid=document.getElementById("auth-grid");
@@ -416,6 +429,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       grid.style.display="grid";
       signIn.style.display="block";
       signUp.style.display="none";
+      const methodSel=document.getElementById("auth-signin-method");
+      const method = String(methodSel?.value || "pin");
+      if(methodSel) methodSel.value = method;
+      window.setAuthSignInMethod(method);
     } else if(mode==="signup"){
       home.style.display="none";
       grid.style.display="grid";
@@ -530,6 +547,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     try{
       const confirmation = await signInWithPhoneNumber(auth, phone, getPhoneRecaptcha());
       pendingPhoneSignIn = { confirmation, profileKey: selectedProfile, phone };
+      const methodSel = document.getElementById("auth-signin-method");
+      if(methodSel) methodSel.value = "sms";
+      window.setAuthSignInMethod("sms");
       showAuthError("SMS code sent. Enter code and verify.");
     }catch(err){
       console.error("[IronLog] phone code send failed:", err);
