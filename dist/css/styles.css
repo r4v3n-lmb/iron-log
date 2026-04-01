@@ -1019,6 +1019,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .profile-habit-icon.sleep{background:rgba(178,148,255,.16);color:#d2c2ff}
 .profile-habit-copy{display:grid;gap:5px;min-width:0}
 .profile-habit-copy strong,.profile-mini-card strong{font-size:1rem;font-weight:800}
+.profile-mini-card strong{padding-right:15px}
 .profile-habit-copy span,.profile-mini-card span,.profile-nutrition-side span{font-size:.66rem;font-weight:800;letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
 .profile-habit-actions{display:flex;gap:10px}
 .profile-habit-actions button,.profile-toggle{min-width:48px;height:48px;padding:0 16px;border:none;border-radius:16px;background:rgba(255,255,255,.07);color:var(--text);display:inline-flex;align-items:center;justify-content:center;font-family:'Barlow Condensed',sans-serif;font-size:1rem;font-weight:900}
@@ -1047,6 +1048,7 @@ body[data-mobile-section="profile"] #mobile-profile-section{display:block}
 .calendar-day-entry-actions .st-ab{width:auto;margin:0}
 .profile-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:14px}
 .profile-mini-card{display:grid;gap:14px;padding:18px;border-radius:22px;background:#262626}
+.profile-mini-card-wide{grid-column:1/-1}
 .profile-mini-card-muted{background:#222}
 .profile-toggle{min-width:unset;justify-content:center;padding:0 14px;font-size:.84rem;letter-spacing:.12em;text-transform:uppercase}
 .profile-toggle.active{background:rgba(92,186,92,.16);color:#b4f3b4}

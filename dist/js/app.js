@@ -1,6 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getFirestore, doc, setDoc, getDoc, getDocFromServer, onSnapshot, deleteField, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
+  import { getAnalytics, isSupported as analyticsIsSupported } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyDwkvvVwJbk3JC_ddej74sFOxgPBl2ccE8",
@@ -12,6 +13,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   };
 
   const app = initializeApp(firebaseConfig);
+  analyticsIsSupported().then((supported)=>{ if(supported) getAnalytics(app); }).catch(()=>{});
   const db = getFirestore(app);
   const storage = getStorage(app);
   const APP_VERSION = "v1.1.46";

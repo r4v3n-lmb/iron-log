@@ -2,17 +2,16 @@ import fs from "fs";
 import path from "path";
 const rootDir = process.cwd();
 const srcDir = path.join(rootDir, "src");
-const distDir = path.join(rootDir, "dist");
 
-const distTargets = [
-  { from: path.join(srcDir, "index.html"), to: path.join(distDir, "index.html") },
-  { from: path.join(srcDir, "index.html"), to: path.join(distDir, "ironlog.html") },
-  { from: path.join(srcDir, "manifest.json"), to: path.join(distDir, "manifest.json") },
-  { from: path.join(srcDir, "service-worker.js"), to: path.join(distDir, "service-worker.js") },
-  { from: path.join(srcDir, "css"), to: path.join(distDir, "css") },
-  { from: path.join(srcDir, "js"), to: path.join(distDir, "js") },
-  { from: path.join(srcDir, "icons"), to: path.join(distDir, "icons") },
-  { from: path.join(rootDir, "iron_log_logo.png"), to: path.join(distDir, "iron_log_logo.png") },
+const outputTargets = [
+  { from: path.join(srcDir, "index.html"), to: "index.html" },
+  { from: path.join(srcDir, "index.html"), to: "ironlog.html" },
+  { from: path.join(srcDir, "manifest.json"), to: "manifest.json" },
+  { from: path.join(srcDir, "service-worker.js"), to: "service-worker.js" },
+  { from: path.join(srcDir, "css"), to: "css" },
+  { from: path.join(srcDir, "js"), to: "js" },
+  { from: path.join(srcDir, "icons"), to: "icons" },
+  { from: path.join(rootDir, "iron_log_logo.png"), to: "iron_log_logo.png" },
 ];
 const rootRuntimeTargets = [
   { from: path.join(srcDir, "index.html"), to: path.join(rootDir, "index.html") },
@@ -37,11 +36,15 @@ function copyPath(from, to) {
 }
 
 function build() {
-  fs.rmSync(distDir, { recursive: true, force: true });
-  ensureDir(distDir);
-  distTargets.forEach(({ from, to }) => copyPath(from, to));
+  const outputDirs = ["dist", "deploy"];
+  outputDirs.forEach((dirName) => {
+    const outputDir = path.join(rootDir, dirName);
+    fs.rmSync(outputDir, { recursive: true, force: true });
+    ensureDir(outputDir);
+    outputTargets.forEach(({ from, to }) => copyPath(from, path.join(outputDir, to)));
+  });
   rootRuntimeTargets.forEach(({ from, to }) => copyPath(from, to));
-  console.log(`✓ Built deployable PWA bundle to ${distDir}`);
+  console.log("✓ Built deployable PWA bundle to dist and deploy");
   console.log("✓ Synced runtime root files from src");
 }
 

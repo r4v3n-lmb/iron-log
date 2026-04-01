@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "node build.js",
-    "dev": "node build.js --watch"
+    "build:hosting": "node build.js",
+    "dev": "node build.js",
+    "firebase:serve": "npx firebase emulators:start --only hosting",
+    "firebase:deploy": "npm run build:hosting && npx firebase deploy --project ironlog-v1 --only hosting:ironlog-v1"
   },
   "keywords": [
     "fitness",
@@ -14,6 +17,10 @@
   "author": "Revan Lombard",
   "license": "MIT",
   "dependencies": {
-    "codex": "^0.2.3"
+    "codex": "^0.2.3",
+    "firebase": "^12.11.0"
+  },
+  "devDependencies": {
+    "firebase-tools": "^14.3.1"
   }
 }

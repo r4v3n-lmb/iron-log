@@ -2,7 +2,7 @@
 
 **App version:** `v1.1.43`
 
-A modular workout tracking PWA with Firebase backend. Edit the source app in `src/`, then build a clean deployable site into `dist/`.
+A modular workout tracking PWA with Firebase backend. Edit the source app in `src/`, then build clean deployable outputs into `dist/` and `deploy/`.
 
 **Live app:** https://r4v3n-lmb.github.io/iron-log/
 
@@ -23,8 +23,11 @@ ironlog/
 │   └── icons/
 │       ├── icon-192.png
 │       └── icon-512.png
-├── dist/                    # Generated deployable site
+├── dist/                    # Generated deployable site output
+├── deploy/                  # Firebase Hosting public directory
 ├── build.js                 # Build/copy script
+├── firebase.json            # Firebase Hosting config
+├── .firebaserc.example      # Firebase project mapping template
 ├── package.json
 ├── .gitignore
 └── README.md
@@ -37,6 +40,7 @@ ironlog/
 ### Prerequisites
 
 - Node.js installed
+- Firebase CLI available (installed via `npm install`)
 
 ### Installation
 
@@ -91,7 +95,7 @@ To generate the deployable PWA bundle:
 npm run build
 ```
 
-This creates a fresh `dist/` folder containing:
+This creates fresh `dist/` and `deploy/` folders containing:
 
 - `dist/index.html`
 - `dist/ironlog.html`
@@ -100,14 +104,35 @@ This creates a fresh `dist/` folder containing:
 - `dist/manifest.json`
 - `dist/service-worker.js`
 - `dist/icons/*`
+- `deploy/index.html`
+- `deploy/ironlog.html`
+- `deploy/css/styles.css`
+- `deploy/js/app.js`
+- `deploy/manifest.json`
+- `deploy/service-worker.js`
+- `deploy/icons/*`
 
 The build also syncs root runtime files (`index.html`, `ironlog.html`, `js/`, `css/`, `manifest.json`, `service-worker.js`, `icons/`) from `src/` to keep source/build versions aligned.
 
-## Distribution
+## Firebase Hosting
 
-**For deployment:**
-1. Run `npm run build`
-2. Publish the generated `dist/` folder
+1. Create `.firebaserc` in the project root using `.firebaserc.example` and set your Firebase project ID.
+2. Authenticate once:
+   ```bash
+   npx firebase login
+   ```
+3. Select the active project:
+   ```bash
+   npx firebase use <your-firebase-project-id>
+   ```
+4. Build and deploy Hosting:
+   ```bash
+   npm run firebase:deploy
+   ```
+5. Optional local Hosting emulator:
+   ```bash
+   npm run firebase:serve
+   ```
 
 **For development:**
 1. Work in `src/`
@@ -165,8 +190,11 @@ The build also syncs root runtime files (`index.html`, `ironlog.html`, `js/`, `c
 
 | Command | Description |
 |---|---|
-| `npm run build` | Rebuild the deployable `dist/` site |
+| `npm run build` | Rebuild `dist/` and `deploy/` outputs |
+| `npm run build:hosting` | Build Hosting-ready output (`deploy/`) |
 | `npm run dev` | Alias for the build script |
+| `npm run firebase:serve` | Run Firebase Hosting emulator |
+| `npm run firebase:deploy` | Build and deploy Firebase Hosting |
 
 ---
 

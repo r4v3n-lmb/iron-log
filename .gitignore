@@ -1,5 +1,7 @@
 node_modules/
 dist/
+deploy/
+.firebase/
 .DS_Store
 .env
 .env.local
