@@ -134,6 +134,34 @@ The build also syncs root runtime files (`index.html`, `ironlog.html`, `js/`, `c
    npm run firebase:serve
    ```
 
+## Firebase Auth + AI + Storage Setup
+
+1. In Firebase Console (`ironlog-v1`), enable Auth providers:
+   - Email/Password
+   - Phone
+2. Add your Hosting domain to Auth authorized domains.
+3. Deploy cloud functions dependencies:
+   ```bash
+   cd functions
+   npm install
+   cd ..
+   ```
+4. Set AI secret used by callable function:
+   ```bash
+   npx firebase functions:secrets:set GEMINI_API_KEY
+   ```
+5. Deploy functions + hosting:
+   ```bash
+   npm run firebase:deploy:all
+   ```
+
+The app now supports:
+- PIN login (existing flow)
+- Email/password login (Firebase Auth)
+- Phone verification login with SMS code (Firebase Auth)
+- AI-assisted meal estimates (calories + protein) via callable function `estimateMealNutrition`
+- Firebase Storage uploads for avatars and progress photos
+
 **For development:**
 1. Work in `src/`
 2. Run `npm run build` before publishing
@@ -195,6 +223,8 @@ The build also syncs root runtime files (`index.html`, `ironlog.html`, `js/`, `c
 | `npm run dev` | Alias for the build script |
 | `npm run firebase:serve` | Run Firebase Hosting emulator |
 | `npm run firebase:deploy` | Build and deploy Firebase Hosting |
+| `npm run firebase:deploy:functions` | Deploy Firebase Functions only |
+| `npm run firebase:deploy:all` | Deploy Hosting and Functions |
 
 ---
 

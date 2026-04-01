@@ -49,12 +49,25 @@
         <select id="auth-user-select" class="fsel"></select>
         <input id="auth-pin" class="fi" type="password" inputmode="numeric" placeholder="PIN">
         <button class="st-ab" onclick="signInAccount()">SIGN IN</button>
+        <div class="auth-field-label">OR EMAIL LOGIN</div>
+        <input id="auth-email" class="fi" type="email" placeholder="Email">
+        <input id="auth-password" class="fi" type="password" placeholder="Password">
+        <button class="st-ab" onclick="signInWithEmailPassword()">SIGN IN WITH EMAIL</button>
+        <div class="auth-field-label">OR PHONE VERIFICATION</div>
+        <input id="auth-phone" class="fi" type="tel" placeholder="+27711234567">
+        <button class="st-ab" onclick="sendPhoneVerificationCode()">SEND CODE</button>
+        <input id="auth-phone-code" class="fi" type="text" inputmode="numeric" placeholder="SMS code">
+        <button class="st-ab" onclick="verifyPhoneVerificationCode()">VERIFY PHONE</button>
+        <div id="auth-recaptcha"></div>
         <button class="st-ab auth-back" onclick="showAuthMode('home')">BACK</button>
       </div>
       <div id="auth-signup-pane" class="auth-pane" style="display:none">
         <div class="auth-h">SIGN UP</div>
         <input id="signup-name" class="fi" placeholder="Name">
         <input id="signup-pin" class="fi" type="password" inputmode="numeric" placeholder="PIN">
+        <input id="signup-email" class="fi" type="email" placeholder="Email (for Firebase login)">
+        <input id="signup-password" class="fi" type="password" placeholder="Password (min 6 chars)">
+        <input id="signup-phone" class="fi" type="tel" placeholder="Phone +country (optional)">
         <input id="signup-height" class="fi" type="number" min="120" max="230" placeholder="Height (cm)">
         <input id="signup-color" type="hidden" value="#4361ee">
         <div class="auth-field-label">THEME COLOUR</div>

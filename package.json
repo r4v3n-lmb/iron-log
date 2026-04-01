@@ -8,7 +8,9 @@
     "build:hosting": "node build.js",
     "dev": "node build.js",
     "firebase:serve": "npx firebase emulators:start --only hosting",
-    "firebase:deploy": "npm run build:hosting && npx firebase deploy --project ironlog-v1 --only hosting:ironlog-v1"
+    "firebase:deploy": "npm run build:hosting && npx firebase deploy --project ironlog-v1 --only hosting:ironlog-v1",
+    "firebase:deploy:functions": "npx firebase deploy --project ironlog-v1 --only functions",
+    "firebase:deploy:all": "npm run build:hosting && npx firebase deploy --project ironlog-v1 --only hosting:ironlog-v1,functions"
   },
   "keywords": [
     "fitness",
