@@ -35,16 +35,13 @@ jobs:
       - name: Build PWA site
         run: npm run build
 
-      - name: Install Functions dependencies
-        run: npm --prefix functions install --no-audit --no-fund
-
       - name: Write Firebase service account key
         run: |
           cat > "$RUNNER_TEMP/firebase-sa.json" <<'JSON'
           ${{ secrets.FIREBASE_SERVICE_ACCOUNT_IRONLOG_V1 }}
           JSON
 
-      - name: Deploy to Firebase (Hosting + Functions)
+      - name: Deploy to Firebase (Hosting only)
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/firebase-sa.json
-        run: npx firebase deploy --project ironlog-v1 --only hosting:ironlog-v1,functions
+        run: npx firebase deploy --project ironlog-v1 --only hosting:ironlog-v1
