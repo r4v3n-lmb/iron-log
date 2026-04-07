@@ -852,7 +852,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       }
       const migratedPins = await migrateAccountPinsIfNeeded();
       const backfilledLegacy = backfillLegacyAccountsIfMissing();
-      if(migratedPins || backfilledLegacy) await persistAccounts();
+      if(migratedPins || backfilledLegacy){
+        try{
+          await persistAccounts();
+        }catch(err){
+          // Keep locally loaded/backfilled accounts even if remote write is blocked.
+          console.warn("[IronLog] persistAccounts failed after migration/backfill:", err);
+        }
+      }
       buildProfilesFromAccounts();
       if(!PROFILES[activeProfile]){
         const first = Object.keys(PROFILES)[0] || "revan";
@@ -861,6 +868,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       }
     }catch(e){
       accountRegistry = deepCopy(DEFAULT_ACCOUNTS);
+      backfillLegacyAccountsIfMissing();
       buildProfilesFromAccounts();
     }
   }
