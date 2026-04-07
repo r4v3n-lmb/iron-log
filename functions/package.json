@@ -6,7 +6,7 @@
     "node": "22"
   },
   "scripts": {
-    "lint": "echo \"No lint configured\"",
+    "lint": "node --check index.js",
     "serve": "firebase emulators:start --only functions",
     "deploy": "firebase deploy --only functions"
   },

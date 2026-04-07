@@ -19,6 +19,7 @@
 
 </head>
 <body>
+<a class="skip-link" href="#mainApp">Skip to main content</a>
 <div id="app-splash">
   <div class="app-splash-card">
     <img class="logo-img" src="iron_log_logo.png" alt="IRON LOG">
@@ -448,6 +449,7 @@
 </div>
 <input id="profile-avatar-input" type="file" accept="image/*" style="display:none" onchange="handleProfileAvatarUpload(event)">
 <input id="visual-progress-input" type="file" accept="image/*" multiple style="display:none" onchange="handleVisualProgressUpload(event)">
+<input id="form-check-input" type="file" accept="image/*,video/*" multiple style="display:none" onchange="handleFormCheckUpload(event)">
 
 <!-- SETTINGS -->
 <div id="sto"></div>
@@ -466,6 +468,14 @@
     <div class="stst stst-toggle" onclick="toggleSettingsSection('user')"><span>USER</span><span class="st-arrow" id="st-arrow-user">▾</span></div>
     <div class="st-body">
       <div id="stprofs"></div>
+      <div class="settings-install-card" style="margin-top:8px">
+        <div class="settings-install-title">PROFILE VISIBILITY</div>
+        <div class="settings-install-help">Toggle whether your profile can appear in public rankings and shared links.</div>
+        <div class="th-btns" style="margin-top:8px">
+          <button class="th-btn" onclick="togglePublicProfile(true)">🌐 PUBLIC</button>
+          <button class="th-btn" onclick="togglePublicProfile(false)">🔒 PRIVATE</button>
+        </div>
+      </div>
     </div>
   </div>
   <div class="sts" data-sec="data">
@@ -475,7 +485,20 @@
       <button class="st-ab" onclick="refreshAppAndClearCache()" style="color:#ffb4c0;border-color:rgba(244,63,94,.35)">♻ CLEAR LOCAL CACHE & RELOAD</button>
       <button class="st-ab" onclick="cleanupDuplicatePRs()" style="color:#f0c040;border-color:rgba(240,192,64,.35)">🧹 CLEAN DUPLICATE PRS</button>
       <button class="st-ab" onclick="exportCSV()">📥 EXPORT CSV</button>
+      <button class="st-ab" onclick="exportPdfSummary()">🧾 EXPORT PDF SUMMARY</button>
+      <button class="st-ab" onclick="restoreArchivedWorkoutPrompt()">♻ RESTORE ARCHIVED WORKOUT</button>
       <label class="st-ab" style="cursor:pointer">📤 IMPORT CSV<input type="file" id="cii" accept=".csv" style="display:none"></label>
+      <button class="st-ab" onclick="document.getElementById('form-check-input')?.click()">🎥 UPLOAD FORM CHECK</button>
+      <button class="st-ab" onclick="applyGlobalTemplate()">📚 IMPORT GLOBAL TEMPLATE</button>
+      <button class="st-ab" onclick="createRecurringPlanPrompt()">🗓 CREATE RECURRING PLAN</button>
+      <button class="st-ab" onclick="runRecurringPlanPrompt()">▶ RUN RECURRING PLAN</button>
+      <button class="st-ab" onclick="createReferralCode()">🎟 CREATE REFERRAL CODE</button>
+      <button class="st-ab" onclick="redeemReferralCode()">✅ REDEEM REFERRAL CODE</button>
+      <button class="st-ab" onclick="createSocialPostPrompt()">🧑‍🤝‍🧑 CREATE SOCIAL POST</button>
+      <button class="st-ab" onclick="followUserPrompt()">➕ FOLLOW USER</button>
+      <button class="st-ab" onclick="linkCoachPrompt()">🧢 LINK COACH/CLIENT</button>
+      <button class="st-ab" onclick="shareProgressCard()">🖼 GENERATE SHARE CARD</button>
+      <button class="st-ab" onclick="startYocoCheckout()">💳 START YOCO CHECKOUT</button>
     </div>
   </div>
   <div class="sts" data-sec="install">
@@ -721,7 +744,7 @@
 
 <datalist id="exercise-options"></datalist>
 <div id="confetti-container"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <nav class="bottom-nav" id="bottomNav" role="navigation" aria-label="Main navigation">
   <button class="bnav-item active" data-section="dashboard" ontouchstart="navTo('dashboard', this)" onclick="navTo('dashboard', this)">
     <span class="bnav-icon material-symbols-outlined">dashboard</span>

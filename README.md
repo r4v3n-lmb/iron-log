@@ -1,6 +1,6 @@
 # IRON LOG
 
-**App version:** `v1.1.43`
+**App version:** `v1.1.46`
 
 A modular workout tracking PWA with Firebase backend. Edit the source app in `src/`, then build clean deployable outputs into `dist/` and `deploy/`.
 
@@ -134,6 +134,20 @@ The build also syncs root runtime files (`index.html`, `ironlog.html`, `js/`, `c
    npm run firebase:serve
    ```
 
+## Multi-Environment Setup (Dev / Staging / Prod)
+
+1. Copy `.firebaserc.example` to `.firebaserc`.
+2. Set your Firebase project aliases for `dev`, `staging`, and `prod`.
+3. Use environment-specific deploy commands:
+   ```bash
+   npm run firebase:deploy:staging
+   npm run firebase:deploy:prod
+   ```
+4. Run emulator smoke tests before production deploys:
+   ```bash
+   npm run test:emulators
+   ```
+
 ## Firebase Auth + AI + Storage Setup
 
 1. In Firebase Console (`ironlog-v1`), enable Auth providers:
@@ -161,6 +175,12 @@ The app now supports:
 - Phone verification login with SMS code (Firebase Auth)
 - AI-assisted meal estimates (calories + protein) via callable function `estimateMealNutrition`
 - Firebase Storage uploads for avatars and progress photos
+- Feature-flag/config fetch via callable function (`getClientConfig`)
+- Audit logging and callable rate limiting foundation
+- Role/claims management callable (`setUserRole`)
+- In-app notification and recurring plan backend scaffolding
+- Referral/webhook/exercise-catalog backend scaffolding
+- Scheduled Functions for daily refresh/reminder/cleanup processing
 
 **For development:**
 1. Work in `src/`
@@ -223,8 +243,11 @@ The app now supports:
 | `npm run dev` | Alias for the build script |
 | `npm run firebase:serve` | Run Firebase Hosting emulator |
 | `npm run firebase:deploy` | Build and deploy Firebase Hosting |
+| `npm run firebase:deploy:staging` | Deploy hosting/functions/rules to staging alias |
+| `npm run firebase:deploy:prod` | Deploy hosting/functions/rules to production alias |
 | `npm run firebase:deploy:functions` | Deploy Firebase Functions only |
 | `npm run firebase:deploy:all` | Deploy Hosting and Functions |
+| `npm run test:emulators` | Run local emulator smoke tests (functions/firestore/auth/storage) |
 
 ---
 

@@ -1,0 +1,61 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "items",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "seen",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "workout_archive",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "softDeleted",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "recoverableUntil",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "notifications.enabled",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "notifications.reminderHour",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "webhook_queue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

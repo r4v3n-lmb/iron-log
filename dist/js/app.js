@@ -1,7 +1,8 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
   import { getFirestore, doc, setDoc, getDoc, getDocFromServer, onSnapshot, deleteField, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
   import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-storage.js";
-  import { getAnalytics, isSupported as analyticsIsSupported } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+  import { getAnalytics, logEvent, isSupported as analyticsIsSupported } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-analytics.js";
+  import { getPerformance } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-performance.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, signOut as firebaseSignOut, RecaptchaVerifier, signInWithPhoneNumber } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
   import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-functions.js";
 
@@ -15,14 +16,41 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   };
 
   const app = initializeApp(firebaseConfig);
-  analyticsIsSupported().then((supported)=>{ if(supported) getAnalytics(app); }).catch(()=>{});
+  let analyticsInstance = null;
+  let perfInstance = null;
+  analyticsIsSupported().then((supported)=>{
+    if(!supported) return;
+    analyticsInstance = getAnalytics(app);
+    perfInstance = getPerformance(app);
+  }).catch(()=>{});
   const db = getFirestore(app);
   const storage = getStorage(app);
   const auth = getAuth(app);
   const functionsClient = getFunctions(app);
-  const APP_VERSION = "v1.1.46";
+  const APP_VERSION = "v1.1.48";
+  const ENVIRONMENT = firebaseConfig.projectId.includes("prod") ? "prod" : (firebaseConfig.projectId.includes("staging") ? "staging" : "dev");
   let phoneRecaptcha = null;
   let pendingPhoneSignIn = null;
+  let mealLogDateContext = null;
+  let remoteFeatureFlags = {};
+  let remoteNotifications = [];
+  let remoteTemplates = [];
+  let lastRemoteSyncMeta = null;
+  let premiumProfiles = {};
+  let currentUserPremium = false;
+  const FREE_WORKOUT_DAY_LIMIT = 3;
+  const DEVICE_CLIENT_ID = (() => {
+    try{
+      const key="ironlog_client_id";
+      const existing=localStorage.getItem(key);
+      if(existing) return existing;
+      const created=`dev_${Math.random().toString(36).slice(2,10)}_${Date.now().toString(36)}`;
+      localStorage.setItem(key, created);
+      return created;
+    }catch(_e){
+      return `dev_${Date.now().toString(36)}`;
+    }
+  })();
 
   // Plans are now sourced from Firebase only.
   const DEFAULT_PLAN = {};
@@ -46,12 +74,15 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     revan:  { name:"Revan",   pinHash:"e713b8365fd980064c2383fc19f8a41be76a5dc1c37fb3b4ad9d0df29ac20eac", color:"#e85d04", birthday:"04-30", water:3.0, protein:160, height:180, weighMode:"daily" },
     bronwen:{ name:"Bronwen", pinHash:"c41721d4d87370ba2668cf50c4d137245af61214aba5c2d3cdc27e42c27cc686", color:"#f72585", birthday:"04-25", water:2.5, protein:120, height:162, weighMode:"daily" }
   };
+  const LEGACY_RESTORED_ACCOUNTS = {
+    melissa:{ name:"Melissa", pinHash:"020a48f9e2fcaa5d9b7b5f9b5a742c8b08670983fd5835687f247edc53c13de9", color:"#7b2cbf", birthday:null, water:2.5, protein:120, height:165, weighMode:"daily", createdAt:"2026-04-07T00:00:00.000Z" }
+  };
   let accountRegistry = {};
   let PROFILES = {};
   let BASE_PROFILES = {};
 
   let activeProfile = localStorage.getItem("ironlog_profile")||"revan";
-  let state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{}, visualProgress:[], allUserWorkouts:{} };
+  let state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{}, visualProgress:[], formChecks:[], allUserWorkouts:{} };
   let activeDay = null;
   let activeDate = getTodayStr();
   let unsubscribeFn = null;
@@ -150,8 +181,39 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     }
     return changed;
   }
+  function backfillLegacyAccountsIfMissing(){
+    let changed = false;
+    Object.keys(LEGACY_RESTORED_ACCOUNTS || {}).forEach(pk=>{
+      if(accountRegistry?.[pk]) return;
+      accountRegistry[pk] = deepCopy(LEGACY_RESTORED_ACCOUNTS[pk]);
+      changed = true;
+    });
+    return changed;
+  }
   function getSnapshotStorageKey(profileKey=activeProfile){ return `ironlog_pwa_snapshot_${profileKey}`; }
   function getPendingSyncStorageKey(profileKey=activeProfile){ return `ironlog_pwa_pending_sync_${profileKey}`; }
+  function isPremiumProfile(profileKey=activeProfile){
+    return premiumProfiles?.[profileKey] === true || currentUserPremium === true;
+  }
+  function requirePremiumFeature(featureLabel){
+    if(isPremiumProfile(activeProfile)) return true;
+    toast(`Premium required: ${featureLabel}. Start Yoco checkout to unlock this.`);
+    return false;
+  }
+  function getWorkoutDayCount(){
+    return Object.keys(WORKOUT_PLAN || {}).length;
+  }
+  function canCreateWorkoutDayForProfile(profileKey=activeProfile){
+    return isPremiumProfile(profileKey) || getWorkoutDayCount() < FREE_WORKOUT_DAY_LIMIT;
+  }
+  function assertCanCreateWorkoutDay(){
+    if(canCreateWorkoutDayForProfile(activeProfile)) return true;
+    toast(`Free plan is limited to ${FREE_WORKOUT_DAY_LIMIT} workout days. Upgrade to add more.`);
+    return false;
+  }
+  function isLeaderboardEligibleProfile(profileKey){
+    return isPremiumProfile(profileKey);
+  }
   function buildLocalSnapshot(){
     return {
       plan: WORKOUT_PLAN || {},
@@ -164,6 +226,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       exerciseMeta: state.exerciseMeta || {},
       userOverrides: state.userOverrides || {},
       visualProgress: Array.isArray(state.visualProgress) ? state.visualProgress : [],
+      formChecks: Array.isArray(state.formChecks) ? state.formChecks : [],
+      premiumProfiles: premiumProfiles || {},
       savedAt: new Date().toISOString()
     };
   }
@@ -180,6 +244,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function saveLocalSnapshot(profileKey=activeProfile){
     try{ localStorage.setItem(getSnapshotStorageKey(profileKey), JSON.stringify(buildLocalSnapshot())); }catch(_e){}
   }
+  function getLocalSnapshotSavedAt(profileKey=activeProfile){
+    try{
+      const raw=localStorage.getItem(getSnapshotStorageKey(profileKey));
+      if(!raw) return "";
+      const parsed=JSON.parse(raw);
+      return String(parsed?.savedAt || "");
+    }catch(_e){
+      return "";
+    }
+  }
   function applyLocalSnapshot(snapshot){
     if(!snapshot || typeof snapshot !== "object") return false;
     WORKOUT_PLAN = snapshot.plan ? deepCopy(snapshot.plan) : seedPlan(activeProfile);
@@ -193,6 +267,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     state.exerciseMeta = snapshot.exerciseMeta || {};
     state.userOverrides = snapshot.userOverrides || {};
     state.visualProgress = Array.isArray(snapshot.visualProgress) ? snapshot.visualProgress : [];
+    state.formChecks = Array.isArray(snapshot.formChecks) ? snapshot.formChecks : [];
+    premiumProfiles = snapshot.premiumProfiles && typeof snapshot.premiumProfiles==="object" ? snapshot.premiumProfiles : {};
     applyUserOverrides(state.userOverrides);
     return true;
   }
@@ -217,6 +293,442 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function syncOfflineState(){
     document.body.classList.toggle("app-offline", !navigator.onLine);
   }
+  function trackEvent(eventName, params={}){
+    try{
+      if(analyticsInstance) logEvent(analyticsInstance, eventName, params);
+    }catch(_e){}
+    try{
+      if(!auth?.currentUser) return;
+      const callable=httpsCallable(functionsClient, "trackClientEvent");
+      callable({ eventName, params }).catch(()=>{});
+    }catch(_e){}
+  }
+  function isFeatureEnabled(flagKey, fallback=true){
+    if(Object.prototype.hasOwnProperty.call(remoteFeatureFlags, flagKey)) return !!remoteFeatureFlags[flagKey];
+    return !!fallback;
+  }
+  async function loadRemoteClientConfig(){
+    if(!auth?.currentUser) return;
+    try{
+      const callable=httpsCallable(functionsClient, "getClientConfig");
+      const result=await callable({});
+      const data=result?.data||{};
+      remoteFeatureFlags = data.flags || {};
+      currentUserPremium = data.premium === true;
+      if(data.timezone){
+        try{ localStorage.setItem("ironlog_timezone", String(data.timezone)); }catch(_e){}
+      }
+      if(typeof data.publicProfile === "boolean"){
+        try{ localStorage.setItem("ironlog_public_profile", data.publicProfile ? "1":"0"); }catch(_e){}
+      }
+    }catch(err){
+      console.warn("[IronLog] loadRemoteClientConfig failed:", err);
+    }
+  }
+  async function pushUserPreferences(){
+    if(!auth?.currentUser) return;
+    try{
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "Africa/Johannesburg";
+      const publicProfile = localStorage.getItem("ironlog_public_profile")==="1";
+      const callable=httpsCallable(functionsClient, "saveUserPreferences");
+      await callable({
+        timezone,
+        publicProfile,
+        notificationsEnabled: true,
+        reminderHour: 18
+      });
+    }catch(err){
+      console.warn("[IronLog] saveUserPreferences failed:", err);
+    }
+  }
+  async function registerDeviceNotificationToken(){
+    if(!auth?.currentUser) return;
+    try{
+      const callable=httpsCallable(functionsClient, "registerPushToken");
+      await callable({
+        token: `web_${DEVICE_CLIENT_ID}`,
+        platform: "web"
+      });
+    }catch(err){
+      console.warn("[IronLog] registerPushToken failed:", err);
+    }
+  }
+  async function loadRemoteNotifications(){
+    if(!auth?.currentUser) return [];
+    try{
+      const callable=httpsCallable(functionsClient, "listInAppNotifications");
+      const result=await callable({});
+      remoteNotifications = Array.isArray(result?.data?.items) ? result.data.items : [];
+      return remoteNotifications;
+    }catch(err){
+      console.warn("[IronLog] listInAppNotifications failed:", err);
+      return remoteNotifications;
+    }
+  }
+  async function markRemoteNotificationsSeen(ids=[]){
+    const clean=(Array.isArray(ids)?ids:[]).filter(Boolean);
+    if(!clean.length || !auth?.currentUser) return;
+    try{
+      const callable=httpsCallable(functionsClient, "markInAppNotificationsSeen");
+      await callable({ ids: clean });
+    }catch(err){
+      console.warn("[IronLog] markInAppNotificationsSeen failed:", err);
+    }
+  }
+  async function loadGlobalTemplates(){
+    if(!auth?.currentUser) return [];
+    try{
+      const callable=httpsCallable(functionsClient, "listWorkoutTemplates");
+      const result=await callable({});
+      remoteTemplates = Array.isArray(result?.data?.items) ? result.data.items : [];
+      return remoteTemplates;
+    }catch(err){
+      console.warn("[IronLog] listWorkoutTemplates failed:", err);
+      return remoteTemplates;
+    }
+  }
+  async function ensureGlobalTemplateSeeded(){
+    if(!auth?.currentUser || !isAdminUser()) return;
+    try{
+      const callable=httpsCallable(functionsClient, "seedWorkoutTemplates");
+      await callable({});
+    }catch(_e){}
+  }
+  async function askProgressionSuggestion(lastWeight, targetReps, completedReps){
+    if(!auth?.currentUser) return null;
+    if(!isPremiumProfile(activeProfile)) return null;
+    try{
+      const callable=httpsCallable(functionsClient, "getProgressionSuggestion");
+      const result=await callable({ lastWeight, targetReps, completedReps });
+      return result?.data || null;
+    }catch(err){
+      console.warn("[IronLog] getProgressionSuggestion failed:", err);
+      return null;
+    }
+  }
+  window.restoreArchivedWorkoutPrompt=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    try{
+      const listCallable=httpsCallable(functionsClient, "listArchivedWorkouts");
+      const listResult=await listCallable({});
+      const items=Array.isArray(listResult?.data?.items)?listResult.data.items:[];
+      if(!items.length){
+        toast("No archived workouts found");
+        return;
+      }
+      const lines=items.slice(0,10).map((it,idx)=>`${idx+1}. ${it.date} · ${it.dayKey} (${it.id})`);
+      const pick=String(prompt(`Select archive to restore:\n${lines.join("\n")}`)||"").trim();
+      let selected=null;
+      const idx=parseInt(pick,10);
+      if(Number.isInteger(idx) && idx>=1 && idx<=Math.min(10, items.length)) selected=items[idx-1];
+      else selected=items.find(it=>String(it.id)===pick);
+      if(!selected){
+        toast("Invalid archive selection");
+        return;
+      }
+      const restoreCallable=httpsCallable(functionsClient, "restoreWorkoutEntry");
+      const restoreResult=await restoreCallable({ archiveId: selected.id });
+      const entry=restoreResult?.data?.entry || {};
+      const date=String(entry?.date || selected.date || "");
+      const dayKey=String(entry?.dayKey || selected.dayKey || "");
+      const payload=entry?.payload && typeof entry.payload==="object" ? entry.payload : null;
+      if(date && dayKey && payload){
+        if(!state.workouts[date]) state.workouts[date]={};
+        state.workouts[date][dayKey]=payload;
+        await saveData();
+        renderAll();
+      }
+      toast(`Restored archived workout ${date} · ${dayKey}`);
+      trackEvent("workout_restored", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] restoreWorkoutEntry failed:", err);
+      toast("Workout restore failed");
+    }
+  };
+  window.createReferralCode=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("referrals")) return;
+    const custom = prompt("Custom referral code (optional, letters/numbers only)");
+    try{
+      const callable=httpsCallable(functionsClient, "createReferralCode");
+      const result=await callable({ code: String(custom||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"") });
+      const code = String(result?.data?.code || "").trim();
+      if(!code){
+        toast("Could not generate referral code");
+        return;
+      }
+      try{ await navigator.clipboard.writeText(code); }catch(_e){}
+      toast(`Referral code: ${code} (copied if allowed)`);
+      trackEvent("referral_code_created", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] createReferralCode failed:", err);
+      toast("Referral code creation failed");
+    }
+  };
+  window.redeemReferralCode=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("referrals")) return;
+    const code = String(prompt("Enter referral code")||"").trim().toUpperCase();
+    if(!code) return;
+    try{
+      const callable=httpsCallable(functionsClient, "redeemReferralCode");
+      await callable({ code });
+      toast("Referral code redeemed");
+      trackEvent("referral_code_redeemed", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] redeemReferralCode failed:", err);
+      toast("Invalid or inactive referral code");
+    }
+  };
+  window.exportPdfSummary=function(){
+    const lines=[];
+    const today=getTodayStr();
+    const workoutsThisMonth=getDaysWorkedThisMonth();
+    const totalTonnage=calcSessionTonnage(today,getTodayDayKey()||"") || 0;
+    lines.push("IRON LOG SUMMARY");
+    lines.push(`Generated: ${new Date().toLocaleString("en-ZA")}`);
+    lines.push(`Profile: ${PROFILES?.[activeProfile]?.label || activeProfile}`);
+    lines.push(`Workouts this month: ${workoutsThisMonth}`);
+    lines.push(`Current streak: ${calcStreak()} day(s)`);
+    lines.push(`Today's tonnage estimate: ${Math.round(totalTonnage)} kg`);
+    const win=window.open("", "_blank", "width=820,height=900");
+    if(!win){
+      toast("Pop-up blocked");
+      return;
+    }
+    win.document.write(`<html><head><title>Iron Log Summary</title><style>body{font-family:Arial,sans-serif;padding:24px;line-height:1.5}h1{margin:0 0 12px}pre{white-space:pre-wrap;font-size:14px}</style></head><body><h1>Iron Log Summary</h1><pre>${escHtml(lines.join("\n"))}</pre></body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+    trackEvent("pdf_summary_exported", { env: ENVIRONMENT });
+  };
+  window.startYocoCheckout=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    try{
+      const callable=httpsCallable(functionsClient, "createBillingCheckoutSession");
+      const result=await callable({});
+      const url=String(result?.data?.checkoutUrl || "");
+      const provider=String(result?.data?.provider || "yoco").toLowerCase();
+      if(url){
+        trackEvent("billing_checkout_started", { provider, env: ENVIRONMENT });
+        window.location.href=url;
+        return;
+      }
+      toast("Yoco checkout hook is ready, but URL is not configured yet");
+    }catch(err){
+      console.warn("[IronLog] createBillingCheckoutSession failed:", err);
+      toast("Yoco billing is not configured yet");
+    }
+  };
+  window.startPremiumCheckout=window.startYocoCheckout;
+  window.createSocialPostPrompt=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("social posting")) return;
+    const text=String(prompt("Post to your social feed")||"").trim();
+    if(!text) return;
+    try{
+      const callable=httpsCallable(functionsClient, "createSocialPost");
+      await callable({ text, visibility:"friends" });
+      toast("Social post published");
+      trackEvent("social_post_created", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] createSocialPost failed:", err);
+      toast("Could not publish post");
+    }
+  };
+  window.followUserPrompt=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("social following")) return;
+    const targetUid=String(prompt("Enter UID to follow")||"").trim();
+    if(!targetUid) return;
+    try{
+      const callable=httpsCallable(functionsClient, "followUser");
+      await callable({ targetUid });
+      toast(`Now following ${targetUid}`);
+      trackEvent("social_follow_created", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] followUser failed:", err);
+      toast("Could not follow user");
+    }
+  };
+  window.linkCoachPrompt=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("coach tools")) return;
+    const clientUid=String(prompt("Enter client UID to link")||"").trim();
+    if(!clientUid) return;
+    try{
+      const callable=httpsCallable(functionsClient, "setCoachClientRelationship");
+      await callable({ clientUid });
+      toast(`Coach-client link created for ${clientUid}`);
+      trackEvent("coach_client_linked", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] setCoachClientRelationship failed:", err);
+      toast("Coach link failed (requires coach/admin role)");
+    }
+  };
+  window.shareProgressCard=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("share cards")) return;
+    try{
+      const callable=httpsCallable(functionsClient, "createShareCardPayload");
+      const payloadResult=await callable({
+        title: `${PROFILES?.[activeProfile]?.label || "User"} Progress`,
+        subtitle: `Streak ${calcStreak()} days`,
+        stats: [
+          { label:"Workouts / month", value:getDaysWorkedThisMonth() },
+          { label:"Exercises / month", value:getTotalExDoneThisMonth() }
+        ]
+      });
+      const payload=payloadResult?.data?.payload || {};
+      const canvas=document.createElement("canvas");
+      canvas.width=1080;
+      canvas.height=1350;
+      const ctx=canvas.getContext("2d");
+      if(!ctx){
+        toast("Canvas not supported");
+        return;
+      }
+      const grad=ctx.createLinearGradient(0,0,canvas.width,canvas.height);
+      grad.addColorStop(0,"#1b1b1b");
+      grad.addColorStop(1,String(PROFILES?.[activeProfile]?.color || "#e85d04"));
+      ctx.fillStyle=grad;
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle="#ffffff";
+      ctx.font="700 58px sans-serif";
+      ctx.fillText(String(payload.title || "Progress Update"),60,120);
+      ctx.font="400 34px sans-serif";
+      ctx.fillText(String(payload.subtitle || ""),60,180);
+      const stats=Array.isArray(payload.stats)?payload.stats:[];
+      stats.forEach((s,idx)=>{
+        const y=280+(idx*120);
+        ctx.fillStyle="rgba(0,0,0,0.25)";
+        ctx.fillRect(60,y-54,960,90);
+        ctx.fillStyle="#fff";
+        ctx.font="600 30px sans-serif";
+        ctx.fillText(`${String(s?.label || "Stat").toUpperCase()}: ${String(s?.value || "0")}`,84,y);
+      });
+      const dataUrl=canvas.toDataURL("image/png");
+      const a=document.createElement("a");
+      a.href=dataUrl;
+      a.download=`ironlog_share_${Date.now()}.png`;
+      a.click();
+      toast("Share card downloaded");
+      trackEvent("share_card_generated", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] createShareCardPayload failed:", err);
+      toast("Could not generate share card");
+    }
+  };
+  window.createRecurringPlanPrompt=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("recurring plans")) return;
+    const title=String(prompt("Recurring plan name")||"").trim();
+    if(!title) return;
+    const weekdaysRaw=String(prompt("Weekdays (0=Sun..6=Sat), comma separated","1,3,5")||"").trim();
+    const weekdays=weekdaysRaw.split(",").map(v=>parseInt(v.trim(),10)).filter(v=>Number.isInteger(v) && v>=0 && v<=6);
+    const workoutKeys=sortedDayKeys().slice(0,7);
+    try{
+      const callable=httpsCallable(functionsClient, "createRecurringPlan");
+      await callable({ title, weekdays, workoutKeys, startDate:getTodayStr() });
+      toast("Recurring plan saved");
+      trackEvent("recurring_plan_created", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] createRecurringPlan failed:", err);
+      toast("Recurring plan creation failed");
+    }
+  };
+  window.runRecurringPlanPrompt=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    if(!requirePremiumFeature("recurring plans")) return;
+    try{
+      const listCallable=httpsCallable(functionsClient, "listRecurringPlans");
+      const listResult=await listCallable({});
+      const items=Array.isArray(listResult?.data?.items)?listResult.data.items:[];
+      if(!items.length){
+        toast("No recurring plans found");
+        return;
+      }
+      const lines=items.slice(0,10).map((it,idx)=>`${idx+1}. ${it.title} (${it.id})`);
+      const pick=String(prompt(`Select recurring plan to run:\n${lines.join("\n")}`)||"").trim();
+      let selected=null;
+      const idx=parseInt(pick,10);
+      if(Number.isInteger(idx) && idx>=1 && idx<=Math.min(10, items.length)) selected=items[idx-1];
+      else selected=items.find(it=>String(it.id)===pick);
+      if(!selected){
+        toast("Invalid plan selection");
+        return;
+      }
+      const runCallable=httpsCallable(functionsClient, "applyRecurringPlanNow");
+      await runCallable({ planId: selected.id });
+      toast(`Recurring plan run queued: ${selected.title}`);
+      trackEvent("recurring_plan_run", { env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] applyRecurringPlanNow failed:", err);
+      toast("Recurring plan run failed");
+    }
+  };
+  window.applyGlobalTemplate=async function(){
+    if(!requirePremiumFeature("template imports")) return;
+    if(!assertCanCreateWorkoutDay()) return;
+    if(Object.keys(WORKOUT_PLAN).length>=MAX_DAYS){toast("🛑 Max 10 days");return;}
+    await loadGlobalTemplates();
+    if(!remoteTemplates.length){
+      toast("No global templates available");
+      return;
+    }
+    const options=remoteTemplates.map((tpl,idx)=>`${idx+1}. ${tpl.title}`).join("\n");
+    const pickRaw=prompt(`Select template number:\n${options}`);
+    const idx=Math.max(1,Math.min(remoteTemplates.length,parseInt(String(pickRaw||""),10)||0))-1;
+    const tpl=remoteTemplates[idx];
+    if(!tpl) return;
+    const key=`day_${Date.now().toString(36)}`;
+    const next = sortedDayKeys().length + 1;
+    WORKOUT_PLAN[key]={
+      order:next,
+      weekday:null,
+      title:String(tpl.title||"TEMPLATE").toUpperCase(),
+      subtitle:String(tpl.goal||"").toUpperCase(),
+      color:COLORS?.[next % (COLORS?.length||1)] || "#e85d04",
+      exercises:Array.isArray(tpl.exercises)?deepCopy(tpl.exercises):[],
+      participants:["revan"]
+    };
+    normalizeWorkoutPlanOrder();
+    await saveData();
+    renderDayGrid();
+    renderManagement();
+    toast(`Template added: ${tpl.title}`);
+    trackEvent("template_imported", { template: tpl.id || tpl.title, env: ENVIRONMENT });
+  };
   function hideAppSplash(){
     if(appShellReady) return;
     appShellReady = true;
@@ -338,7 +850,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         accountRegistry = deepCopy(DEFAULT_ACCOUNTS);
         await setDoc(ref,{users:accountRegistry},{merge:true});
       }
-      if(await migrateAccountPinsIfNeeded()) await persistAccounts();
+      const migratedPins = await migrateAccountPinsIfNeeded();
+      const backfilledLegacy = backfillLegacyAccountsIfMissing();
+      if(migratedPins || backfilledLegacy) await persistAccounts();
       buildProfilesFromAccounts();
       if(!PROFILES[activeProfile]){
         const first = Object.keys(PROFILES)[0] || "revan";
@@ -491,6 +1005,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     updateLogoColor();
     renderSettingsProfiles();
     await loadData();
+    await loadRemoteClientConfig();
+    await pushUserPreferences();
+    await registerDeviceNotificationToken();
+    await ensureGlobalTemplateSeeded();
+    await loadGlobalTemplates();
+    await loadRemoteNotifications();
+    trackEvent("user_sign_in", { method:"account", profile:pk, env:ENVIRONMENT });
     renderProfileShell();
     toast(`👤 ${PROFILES[pk].label}`);
   }
@@ -522,6 +1043,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         return;
       }
       showAuthError("");
+      trackEvent("user_sign_in", { method:"email", env:ENVIRONMENT });
       await finalizeSignedInUser(profileKey);
     }catch(err){
       console.error("[IronLog] email sign-in failed:", err);
@@ -551,6 +1073,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       if(methodSel) methodSel.value = "sms";
       window.setAuthSignInMethod("sms");
       showAuthError("SMS code sent. Enter code and verify.");
+      trackEvent("phone_verification_code_sent", { env:ENVIRONMENT });
     }catch(err){
       console.error("[IronLog] phone code send failed:", err);
       showAuthError("Could not send phone code");
@@ -571,6 +1094,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       await persistAuthLink(profileKey, cred.user);
       pendingPhoneSignIn = null;
       showAuthError("");
+      trackEvent("user_sign_in", { method:"phone_sms", env:ENVIRONMENT });
       await finalizeSignedInUser(profileKey);
     }catch(err){
       console.error("[IronLog] phone verify failed:", err);
@@ -1126,7 +1650,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             hasKeys(profileData.health) ||
             hasKeys(profileData.exerciseMeta) ||
             hasKeys(profileData.userOverrides) ||
-            (Array.isArray(profileData.visualProgress) && profileData.visualProgress.length)
+            (Array.isArray(profileData.visualProgress) && profileData.visualProgress.length) ||
+            (Array.isArray(profileData.formChecks) && profileData.formChecks.length)
           );
           WORKOUT_PLAN = hasKeys(sharedPlan) ? deepCopy(sharedPlan) : seedPlan(activeProfile);
           state.workouts      = pickRecord(sharedWorkouts, {});
@@ -1143,6 +1668,28 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           state.exerciseMeta  = profileData.exerciseMeta || {};
           state.userOverrides = profileData.userOverrides || {};
           state.visualProgress = Array.isArray(profileData.visualProgress) ? profileData.visualProgress : [];
+          state.formChecks = Array.isArray(profileData.formChecks) ? profileData.formChecks : [];
+          premiumProfiles = (d.premiumProfiles && typeof d.premiumProfiles==="object")
+            ? d.premiumProfiles
+            : Object.keys(pd||{}).reduce((acc, key)=>{
+              if(pd?.[key]?.premium===true) acc[key]=true;
+              return acc;
+            }, {});
+          lastRemoteSyncMeta = profileData.syncMeta || null;
+          const remoteUpdatedAt = String(lastRemoteSyncMeta?.updatedAt || "");
+          const remoteClientId = String(lastRemoteSyncMeta?.clientId || "");
+          const localSavedAt = getLocalSnapshotSavedAt(activeProfile);
+          if(
+            hasPendingSync(activeProfile) &&
+            remoteUpdatedAt &&
+            localSavedAt &&
+            remoteClientId &&
+            remoteClientId !== DEVICE_CLIENT_ID &&
+            new Date(remoteUpdatedAt).getTime() > new Date(localSavedAt).getTime()
+          ){
+            toast("⚠️ Sync conflict detected: newer changes from another device were loaded.");
+            trackEvent("sync_conflict_detected", { env: ENVIRONMENT });
+          }
           applyUserOverrides(state.userOverrides);
           saveLocalSnapshot(activeProfile);
           if((!hasSharedPlan && hasProfilePlan) || (!hasSharedWorkouts && hasProfileWorkouts)) saveData();
@@ -1161,7 +1708,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         } else {
           WORKOUT_PLAN = seedPlan(activeProfile);
           normalizeWorkoutPlanOrder();
-          state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{}, visualProgress:[], allUserWorkouts:{} };
+          state = { workouts:{}, bodyweight:{}, prs:{}, savedWorkouts:{}, gymUrl:"", health:{}, exerciseMeta:{}, userOverrides:{}, visualProgress:[], formChecks:[], allUserWorkouts:{} };
+          premiumProfiles = {};
           applyUserOverrides({});
           latestAppVersion = APP_VERSION;
           appUpdateUrl = DEFAULT_APP_UPDATE_URL;
@@ -1200,9 +1748,17 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
             health:     state.health     || {},
             exerciseMeta: state.exerciseMeta || {},
             userOverrides: state.userOverrides || {},
-            visualProgress: Array.isArray(state.visualProgress) ? state.visualProgress : []
+            visualProgress: Array.isArray(state.visualProgress) ? state.visualProgress : [],
+            formChecks: Array.isArray(state.formChecks) ? state.formChecks : [],
+            premium: isPremiumProfile(activeProfile),
+            syncMeta: {
+              updatedAt: new Date().toISOString(),
+              clientId: DEVICE_CLIENT_ID,
+              appVersion: APP_VERSION
+            }
           }
         },
+        premiumProfiles: premiumProfiles || {},
         legacyMigrationCompleted: true,
         // Backward-compat cleanup for legacy dotted-field writes
         [`profileData.${activeProfile}`]: null
@@ -1237,6 +1793,20 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       payload[`profileData.${activeProfile}.prs.${prKey}`] = deleteField();
     });
     await setDoc(ref, payload, { merge: true });
+  }
+  async function archiveWorkoutBeforeDelete(ds, key){
+    try{
+      const session = state.workouts?.[ds]?.[key];
+      if(!session) return;
+      const callable=httpsCallable(functionsClient, "archiveWorkoutEntry");
+      await callable({
+        date: ds,
+        dayKey: key,
+        payload: deepCopy(session)
+      });
+    }catch(err){
+      console.warn("[IronLog] archiveWorkoutEntry failed:", err);
+    }
   }
   async function deleteRemoteWorkoutDay(key, removedDates=[], prKeys=[]){
     const ref = doc(db, "ironlog", SHARED_DOC);
@@ -2604,6 +3174,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         score: getRankScore(pk, bucket)
       };
     });
+    rows = rows.filter(row=>isLeaderboardEligibleProfile(row.profileKey));
     if(rankScope==="friends"){
       const friendKeys = new Set([activeProfile]);
       Object.values(WORKOUT_PLAN || {}).forEach(day=>{
@@ -2645,20 +3216,14 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       console.error("[IronLog] Rank render failed to collect rows", err);
       rows = [];
     }
-    if(!Array.isArray(rows) || !rows.length){
-      rows = [{
-        profileKey: activeProfile || "user",
-        name: formatRankName(activeProfile || "user"),
-        avatar: getRankAvatar(activeProfile || "user"),
-        score: 0,
-        rank: 1
-      }];
-    }
+    if(!Array.isArray(rows)) rows = [];
     const top = rows.slice(0,3);
     const rest = rows.slice(3);
-    const you = rows.find(r=>r.profileKey===activeProfile) || rows[0] || { rank:1, score:0 };
-    const delta = getRankDelta(you.rank || 1);
-    const topPercent = rows.length ? Math.max(1, Math.round(((you.rank || 1) / rows.length) * 100)) : 100;
+    const youCanRank = isLeaderboardEligibleProfile(activeProfile);
+    const you = rows.find(r=>r.profileKey===activeProfile) || (youCanRank ? (rows[0] || { rank:1, score:0 }) : { rank:"-", score:0 });
+    const youRankNumber = Number.isFinite(Number(you?.rank)) ? Number(you.rank) : null;
+    const delta = youRankNumber ? getRankDelta(youRankNumber) : 0;
+    const topPercent = rows.length && youRankNumber ? Math.max(1, Math.round((youRankNumber / rows.length) * 100)) : 100;
     const unit = getRankUnit();
     const slotMarkup = (row, place)=>{
       if(!row){
@@ -2728,11 +3293,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <div class="irl-you-shell">
           <div class="irl-you-avatar-wrap">
             <img alt="Current User" class="irl-you-avatar" src="${escAttr(getRankAvatar(activeProfile))}">
-            <span class="irl-you-rank">${you.rank || 1}</span>
+            <span class="irl-you-rank">${youRankNumber || "-"}</span>
           </div>
           <div class="irl-you-copy">
-            <h4>YOU <span>${delta>=0?`+${delta}`:delta} POS</span></h4>
-            <p>TOP ${topPercent}% ${rankScope==="friends"?"FRIENDS":"WORLDWIDE"}</p>
+            <h4>YOU <span>${youCanRank ? `${delta>=0?`+${delta}`:delta} POS` : "UPGRADE TO RANK"}</span></h4>
+            <p>${youCanRank ? `TOP ${topPercent}% ${rankScope==="friends"?"FRIENDS":"WORLDWIDE"}` : "PREMIUM REQUIRED FOR LEADERBOARD PARTICIPATION"}</p>
           </div>
           <div class="irl-you-score"><strong>${formatRankScore(you.score || 0)}</strong><p>${unit}</p></div>
         </div>
@@ -2897,6 +3462,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     });
     return { worked, otherUserColor: workoutColor, sourceUser: activeProfile };
   }
+  function getMissedWorkoutEvent(ds, profileKey=activeProfile){
+    const entry = ensureHealthEntry(ds, profileKey);
+    const title = String(entry?.missedEventTitle || "").trim();
+    const reason = String(entry?.missedEventReason || "").trim();
+    if(!title && !reason) return null;
+    return { title, reason };
+  }
 
   window.openWorkoutFromHistory=function(ds,key){
     activeDate = ds;
@@ -2943,10 +3515,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         d.setDate(monday.getDate() + i);
         const ds = d.toISOString().split("T")[0];
         const entries = getCalendarDayEntries(ds);
+        const missedEvent = getMissedWorkoutEvent(ds);
         const workoutColor = entries[0]?.day?.color || getCalendarWorkedMeta(ds).otherUserColor || "";
         days.push({
           label:labels[i],
           worked:entries.length>0,
+          missed:entries.length===0 && !!missedEvent,
           count:entries.length,
           isToday:ds===getTodayStr(),
           date:ds,
@@ -2977,7 +3551,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         </div>
         <div class="consistency-bars">
           ${days.map(day=>`
-            <button class="consistency-pill ${day.worked ? "done" : ""} ${day.isToday ? "today" : ""}" ${day.workoutColor ? `style="--pill-workout:${day.workoutColor}"` : ""} onclick="navTo('progress');selectDate('${day.date}')">
+            <button class="consistency-pill ${day.worked ? "done" : ""} ${day.missed ? "missed" : ""} ${day.isToday ? "today" : ""}" ${day.workoutColor ? `style="--pill-workout:${day.workoutColor}"` : ""} onclick="navTo('progress');selectDate('${day.date}')">
               <strong>${day.label}</strong>
               <em>${day.count || 0}</em>
             </button>
@@ -3073,13 +3647,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const isT=ds===today,isA=ds===activeDate,isFut=ds>today;
       const visible = getCalendarWorkedMeta(ds);
       const worked = visible.worked;
+      const missedEvent = getMissedWorkoutEvent(ds);
+      const hasMissedEvent = !!missedEvent;
       const otherUserColor = visible.otherUserColor;
       const dc=otherUserColor;
       const bday=isBirthday(ds);
       const outMonth=cellDate.getMonth()!==mo;
-      h+=`<div class="cal-cell ${outMonth?'empty':''} ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''} ${isFut?'future':''} ${bday?'bday':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
+      h+=`<div class="cal-cell ${outMonth?'empty':''} ${isT?'today':''} ${isA?'active':''} ${worked?'worked':''} ${isFut?'future':''} ${bday?'bday':''} ${hasMissedEvent?'event':''}" onclick="${isFut?'':'selectDate(\''+ds+'\')'}">
         <span class="cal-n">${cellDate.getDate()}</span>
         ${dc?`<span class="cal-dot" style="background:${dc}"></span>`:''}
+        ${hasMissedEvent?`<span class="cal-evt" title="${escAttr((missedEvent?.title || missedEvent?.reason || "Event").toUpperCase())}">•</span>`:''}
         ${bday?`<span class="cal-bd">🎂</span>`:''}
       </div>`;
     }
@@ -3435,6 +4012,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       state.visualProgress=[...valid,...(Array.isArray(state.visualProgress)?state.visualProgress:[])].slice(0,12);
       renderVisualProgressGallery();
       await saveData();
+      trackEvent("progress_photos_uploaded", { count: valid.length, env: ENVIRONMENT });
       toast(`✓ Added ${valid.length} progress photo${valid.length===1?"":"s"}`);
     }).catch(err=>{
       console.error("[IronLog] visual upload failed:", err);
@@ -3453,6 +4031,45 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     state.visualProgress=current.filter(photo=>photo.id!==id);
     renderVisualProgressGallery();
     await saveData();
+  };
+  window.handleFormCheckUpload=function(event){
+    const files=Array.from(event?.target?.files||[]);
+    if(!files.length) return;
+    if(!requirePremiumFeature("form-check uploads")){
+      event.target.value="";
+      return;
+    }
+    if(!Array.isArray(state.formChecks)) state.formChecks=[];
+    Promise.all(files.map(async file=>{
+      const type=String(file.type||"");
+      if(!(type.startsWith("image/") || type.startsWith("video/"))) return null;
+      const cleanName=String(file.name||"form-check").replace(/[^a-zA-Z0-9._-]/g,"_");
+      const storagePath=`form_checks/${getStorageOwnerId(activeProfile)}/${Date.now()}_${cleanName}`;
+      const fileRef=storageRef(storage, storagePath);
+      await uploadBytes(fileRef, file, { contentType: type || "application/octet-stream" });
+      const src=await getDownloadURL(fileRef);
+      return {
+        id:`formcheck_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+        src:String(src||""),
+        storagePath,
+        kind:type.startsWith("video/")?"video":"image",
+        date:getTodayStr()
+      };
+    })).then(async uploaded=>{
+      const valid=uploaded.filter(Boolean);
+      if(!valid.length){
+        toast("No valid media selected");
+        return;
+      }
+      state.formChecks=[...valid,...state.formChecks].slice(0,40);
+      await saveData();
+      trackEvent("form_check_uploaded", { count: valid.length, env: ENVIRONMENT });
+      toast(`Uploaded ${valid.length} form check file${valid.length===1?"":"s"}`);
+    }).catch(err=>{
+      console.error("[IronLog] form-check upload failed:", err);
+      toast("Form-check upload failed");
+    });
+    event.target.value="";
   };
   function bindActiveWorkoutSwipe(key){
     const card=document.querySelector(".active-participant-card");
@@ -3505,53 +4122,83 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(!calories && !protein) throw new Error("Empty nutrition estimate");
     return { calories, protein, source };
   }
-  window.logMealPrompt=async function(dateStr=getTodayStr()){
+  function applyMealLogEntry(dateStr, food, kcal, proteinG){
     const entry = ensureHealthEntry(dateStr);
-    const food = prompt("What food did you have?", "");
-    if(food===null) return;
-    const cleanFood = String(food || "").trim();
+    entry.protein = Math.max(0, Math.round(Number(entry.protein || 0) + proteinG));
+    entry.meals.push({
+      id:`meal_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      food: String(food || ""),
+      calories: kcal,
+      protein: proteinG
+    });
+    syncHealthCalories(entry);
+  }
+  window.setMealLogMode=function(mode){
+    const manual = document.getElementById("meal-manual-fields");
+    if(manual) manual.style.display = String(mode || "").toLowerCase() === "manual" ? "block" : "none";
+  };
+  function openMealLogModal(dateStr){
+    mealLogDateContext = dateStr || getTodayStr();
+    const modal = document.getElementById("mlm");
+    const foodInput = document.getElementById("meal-food-input");
+    const modeSelect = document.getElementById("meal-estimate-mode");
+    const caloriesInput = document.getElementById("meal-calories-input");
+    const proteinInput = document.getElementById("meal-protein-input");
+    if(foodInput) foodInput.value = "";
+    if(modeSelect) modeSelect.value = "ai";
+    if(caloriesInput) caloriesInput.value = "";
+    if(proteinInput) proteinInput.value = "";
+    window.setMealLogMode("ai");
+    if(modal) modal.style.display = "flex";
+  }
+  window.closeMealLogModal=function(){
+    const modal = document.getElementById("mlm");
+    if(modal) modal.style.display = "none";
+    mealLogDateContext = null;
+  };
+  window.submitMealLog=async function(){
+    const dateStr = mealLogDateContext || getTodayStr();
+    const cleanFood = String(document.getElementById("meal-food-input")?.value || "").trim();
+    const mode = String(document.getElementById("meal-estimate-mode")?.value || "ai").toLowerCase();
     if(!cleanFood){
       toast("⚠️ Enter a food item");
       return;
     }
     let kcal = 0;
     let proteinG = 0;
-    const useAi = confirm("Use AI estimate for calories and protein?");
-    if(useAi){
+    if(mode === "ai"){
       try{
         const estimate = await estimateMealNutritionWithAI(cleanFood);
         kcal = estimate.calories;
         proteinG = estimate.protein;
       }catch(err){
         console.warn("[IronLog] AI meal estimate failed:", err);
+        toast("⚠️ AI estimate failed. Try again or switch to manual.");
+        return;
       }
-    }
-    if(!kcal){
-      const calories = prompt(`Rough calories for "${cleanFood}"`, "");
-      if(calories===null) return;
-      kcal = Math.max(0, Math.round(Number(calories || 0)));
+      if(!kcal && !proteinG){
+        toast("⚠️ AI returned empty estimate.");
+        return;
+      }
+    } else {
+      kcal = Math.max(0, Math.round(Number(document.getElementById("meal-calories-input")?.value || 0)));
+      proteinG = Math.max(0, Math.round(Number(document.getElementById("meal-protein-input")?.value || 0)));
       if(!kcal){
         toast("⚠️ Enter calories");
         return;
       }
     }
-    if(!proteinG){
-      const proteinInput = prompt(`Protein grams for "${cleanFood}" (optional)`, "");
-      if(proteinInput!==null) proteinG = Math.max(0, Math.round(Number(proteinInput || 0)));
-    }
-    entry.protein = Math.max(0, Math.round(Number(entry.protein || 0) + proteinG));
-    entry.meals.push({
-      id:`meal_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
-      food: cleanFood,
-      calories: kcal,
-      protein: proteinG
-    });
-    syncHealthCalories(entry);
+    applyMealLogEntry(dateStr, cleanFood, kcal, proteinG);
     renderHealthChecklist();
     renderProfileShell();
     await saveData();
     await persistHealthEntryMirror(dateStr);
+    trackEvent("meal_logged", { mode, calories: kcal, protein: proteinG, env: ENVIRONMENT });
+    window.closeMealLogModal();
     toast(`🍽 ${cleanFood} logged (${kcal} kcal, ${proteinG}g protein)`);
+  };
+  window.logMealPrompt=async function(dateStr=getTodayStr()){
+    openMealLogModal(dateStr);
   };
   window.removeMealEntry=async function(dateStr, mealId){
     const entry = ensureHealthEntry(dateStr);
@@ -3564,6 +4211,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderProfileShell();
     await saveData();
     await persistHealthEntryMirror(dateStr);
+    trackEvent("meal_deleted", { env: ENVIRONMENT });
   };
   function isDateKey(v){
     return /^\d{4}-\d{2}-\d{2}$/.test(String(v||""));
@@ -3610,6 +4258,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(typeof entry.soreness !== "number") entry.soreness = Number(entry.soreness || 0);
     if(typeof entry.creatine !== "boolean") entry.creatine = !!entry.creatine;
     if(typeof entry.aminos !== "boolean") entry.aminos = !!entry.aminos;
+    if(typeof entry.missedEventTitle !== "string") entry.missedEventTitle = String(entry.missedEventTitle || "");
+    if(typeof entry.missedEventReason !== "string") entry.missedEventReason = String(entry.missedEventReason || "");
     if(!Array.isArray(entry.meals)) entry.meals = [];
     entry.meals = entry.meals.map(meal=>({
       ...meal,
@@ -4821,8 +5471,25 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const el = document.getElementById("history-selected-session");
     if(!el) return;
     const entries = getCalendarDayEntries(ds);
+    const missedEvent = getMissedWorkoutEvent(ds);
     const dayName = formatHistoryDayName(ds);
     const title = new Date(`${ds}T12:00:00`).toLocaleDateString("en-ZA",{month:"long",day:"numeric"}).toUpperCase();
+    const eventCard = missedEvent ? `
+      <article class="history-session-card history-event-card">
+        <div class="history-session-body">
+          <div class="history-session-head">
+            <div>
+              <div class="history-session-title">MISSED WORKOUT EVENT</div>
+              <div class="history-session-time"><span class="material-symbols-outlined">event_note</span>${missedEvent.title || "Planned event"}</div>
+            </div>
+            <div class="history-session-actions">
+              <button type="button" aria-label="Edit event" onclick="openCalendarDayModal('${ds}')"><span class="material-symbols-outlined">edit</span></button>
+            </div>
+          </div>
+          ${missedEvent.reason ? `<div class="calendar-day-entry-copy"><p>${escHtml(missedEvent.reason)}</p></div>` : ""}
+        </div>
+      </article>
+    ` : "";
     const cards = entries.length ? entries.map(entry=>`
       <article class="history-session-card" style="border-left-color:${entry.day.color}">
         <div class="history-session-body">
@@ -4861,8 +5528,12 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           <span class="history-selected-kicker">Selected Session</span>
           <div class="history-selected-title">${title}</div>
         </div>
-        <div class="history-selected-dayname">${dayName}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div class="history-selected-dayname">${dayName}</div>
+          <button type="button" class="history-day-event-btn" onclick="openCalendarDayModal('${ds}')">DAY EVENT</button>
+        </div>
       </div>
+      ${eventCard}
       ${cards}
     `;
   }
@@ -4904,9 +5575,80 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       </div>
     `;
   }
+  window.openCalendarDayModal=function(ds=activeDate){
+    const modal = document.getElementById("calendar-day-modal");
+    const titleEl = document.getElementById("calendar-day-modal-title");
+    const bodyEl = document.getElementById("calendar-day-modal-body");
+    if(!modal || !titleEl || !bodyEl) return;
+    const dateStr = String(ds || activeDate || getTodayStr());
+    const event = getMissedWorkoutEvent(dateStr);
+    const entries = getCalendarDayEntries(dateStr);
+    titleEl.textContent = `DAY DETAILS · ${formatDate(dateStr)}`;
+    bodyEl.innerHTML = `
+      <div class="calendar-event-form">
+        <div class="fl">NON-WORKOUT EVENT TITLE</div>
+        <input id="calendar-event-title" class="fi" placeholder="e.g. Blood donation" value="${escAttr(event?.title || "")}">
+        <div class="fl">REASON / NOTES</div>
+        <textarea id="calendar-event-reason" class="fi" style="min-height:86px;resize:vertical" placeholder="Why you missed training on this day">${escHtml(event?.reason || "")}</textarea>
+        <div class="calendar-event-actions">
+          <button class="msc" type="button" onclick="saveCalendarDayEvent('${dateStr}')">SAVE EVENT</button>
+          <button class="mcc" type="button" onclick="removeCalendarDayEvent('${dateStr}')">CLEAR EVENT</button>
+        </div>
+      </div>
+      <div class="calendar-day-summary">
+        <div class="fl">WORKOUTS LOGGED FOR THIS DATE</div>
+        ${entries.length ? entries.map(entry=>`
+          <div class="calendar-day-entry" style="border-left-color:${entry.day.color}">
+            <div class="calendar-day-entry-head">
+              <strong>${entry.day.title}</strong>
+              <span>${entry.tonnage.toLocaleString()} KG</span>
+            </div>
+            <div class="calendar-day-entry-meta">${entry.exercises} exercises · ${entry.timeLabel}</div>
+          </div>
+        `).join("") : `<div class="history-empty-card" style="margin:0">No workouts logged for this date.</div>`}
+      </div>
+    `;
+    modal.style.display = "flex";
+  };
   window.closeCalendarDayModal=function(){
     const modal = document.getElementById("calendar-day-modal");
     if(modal) modal.style.display = "none";
+  };
+  window.saveCalendarDayEvent=async function(ds){
+    const dateStr = String(ds || activeDate || getTodayStr());
+    const title = String(document.getElementById("calendar-event-title")?.value || "").trim();
+    const reason = String(document.getElementById("calendar-event-reason")?.value || "").trim();
+    if(!title && !reason){
+      toast("⚠️ Enter an event title or reason");
+      return;
+    }
+    const entry = ensureHealthEntry(dateStr);
+    entry.missedEventTitle = title;
+    entry.missedEventReason = reason;
+    await saveData();
+    await persistHealthEntryMirror(dateStr);
+    renderCalendar();
+    renderHistorySelectedSession(dateStr);
+    renderHistoryMonthSummary(dateStr);
+    toast("✓ Day event saved");
+    window.closeCalendarDayModal();
+  };
+  window.removeCalendarDayEvent=async function(ds){
+    const dateStr = String(ds || activeDate || getTodayStr());
+    const entry = ensureHealthEntry(dateStr);
+    if(!entry.missedEventTitle && !entry.missedEventReason){
+      toast("No day event to clear");
+      return;
+    }
+    entry.missedEventTitle = "";
+    entry.missedEventReason = "";
+    await saveData();
+    await persistHealthEntryMirror(dateStr);
+    renderCalendar();
+    renderHistorySelectedSession(dateStr);
+    renderHistoryMonthSummary(dateStr);
+    toast("✓ Day event cleared");
+    window.closeCalendarDayModal();
   };
   window.openCalendarDayWorkout=function(ds,key){
     activeDate = ds;
@@ -4920,6 +5662,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       const pr = state.prs?.[prKey];
       return pr?.date === ds && pr?.dayKey === key;
     });
+    await archiveWorkoutBeforeDelete(ds, key);
     deleteWorkoutEntryFromBucket(state.workouts, ds, key);
     removedPrKeys.forEach(prKey=>{ delete state.prs[prKey]; });
     mirrorWorkoutDeletionAcrossProfiles(ds, key);
@@ -4982,6 +5725,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       await saveData();
       toast(`⚡ Prefilled ${prefilled} fields from last session`);
     }
+    trackEvent("workout_start", { key, profile: activeProfile, prefilled, env: ENVIRONMENT });
     requestAnimationFrame(()=>{
       document.getElementById("day-panel")?.scrollIntoView({behavior:"smooth",block:"start"});
     });
@@ -5037,6 +5781,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       toast(`🏆 NEW PR — ${cleanName} @ ${weight}kg!`);
     } else if(target.checked) {
       toast(`✓ ${PROFILES[participant]?.label||participant}: ${cleanName} complete`);
+      const suggestion=await askProgressionSuggestion(weight, targetSets, reps);
+      if(suggestion?.nextWeight && suggestion.nextWeight!==weight){
+        toast(`Next time try ${suggestion.nextWeight}kg for ${cleanName}`);
+      }
     } else {
       toast(`✓ ${PROFILES[participant]?.label||participant}: set ${loggedSets}/${targetSets}`);
     }
@@ -5136,6 +5884,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       toast(`🏆 NEW PR — ${displayName} @ ${weight}kg!`);
     } else {
       toast(`✓ ${displayName} logged`);
+      if(entry.checked){
+        const targetReps=parseInt(entry.actualReps||0,10)||0;
+        const suggestion=await askProgressionSuggestion(weight, targetReps, reps);
+        if(suggestion?.nextWeight && suggestion.nextWeight!==weight){
+          toast(`Progression: ${displayName} -> ${suggestion.nextWeight}kg next session`);
+        }
+      }
     }
     renderDayPanel(key);
     renderStats();
@@ -5198,7 +5953,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       hideCoverPlayer();
     }
     const sy=window.scrollY; renderDayPanel(key); renderStats(); renderCharts(); renderCalendar(); window.scrollTo(0,sy);
-    await saveData(); if(wo.done)toast("💪 WORKOUT LOGGED");
+    await saveData();
+    if(wo.done){
+      trackEvent("workout_complete", { key, profile: activeProfile, env: ENVIRONMENT });
+      toast("💪 WORKOUT LOGGED");
+    }
   };
   window.saveBw=async function(val){ return saveBwDate(val, getTodayStr()); };
   window.saveBwDate=async function(val,date){
@@ -5538,10 +6297,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.deleteDay=async function(key){
     const day=WORKOUT_PLAN[key]; if(!day)return;
     if(!confirm(`Delete "${day.title}" from your plan and remove your logged entries for this day?`))return;
-    Object.keys(state.workouts||{}).forEach(ds=>{
-      if(!state.workouts?.[ds]?.[key]) return;
+    for(const ds of Object.keys(state.workouts||{})){
+      if(!state.workouts?.[ds]?.[key]) continue;
+      await archiveWorkoutBeforeDelete(ds, key);
       deleteWorkoutEntryFromBucket(state.workouts, ds, key);
-    });
+    }
     const removedPrKeys = Object.keys(state.prs||{}).filter(prKey=>state.prs?.[prKey]?.dayKey===key);
     removedPrKeys.forEach(prKey=>{ delete state.prs[prKey]; });
     delete WORKOUT_PLAN[key]; normalizeWorkoutPlanOrder(); if(activeDay===key){activeDay=null;document.getElementById("day-panel").style.display="none";}
@@ -5552,6 +6312,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   // ─── ADD DAY ───
   const COLORS=["#e85d04","#4361ee","#7b2d8b","#2ec4b6","#f72585","#f0c040","#5cba5c","#e040fb"];
   window.openAddDay=function(){
+    if(!assertCanCreateWorkoutDay()) return;
     if(Object.keys(WORKOUT_PLAN).length>=MAX_DAYS){toast("🛑 Max 10 days");return;}
     const nextOrder = sortedDayKeys().length + 1;
     if(document.getElementById("adlbi")) document.getElementById("adlbi").value=`DAY ${nextOrder}`;
@@ -5587,6 +6348,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   window.selSwatch=function(el,c){ document.querySelectorAll(".csw").forEach(s=>s.classList.remove("csa")); el.classList.add("csa"); document.getElementById("adcp").dataset.color=c; };
   window.closeAddDay=()=>document.getElementById("adm").style.display="none";
   window.confirmAddDay=async function(){
+    if(!assertCanCreateWorkoutDay()) return;
     if(Object.keys(WORKOUT_PLAN).length>=MAX_DAYS){toast("🛑 Max 10 days");return;}
     const templateKey=document.getElementById("adtemplate")?.value||"";
     const template=(state.savedWorkouts||{})[templateKey]||null;
@@ -5943,6 +6705,8 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     document.getElementById("stp").classList.add("open");
     document.getElementById("sto").style.display="block";
     renderSettingsProfiles(); renderAppVersion(); renderManagement(); renderAdminSettingsBlock(); renderInstallSettingsBlock(); renderSettingsSectionUI();
+    loadGlobalTemplates().then(()=>renderManagement());
+    loadRemoteNotifications().then(()=>renderNotifications());
   };
   window.closeSettings=function(){ document.getElementById("stp").classList.remove("open"); document.getElementById("sto").style.display="none"; };
   window.reloadAppShell=async function(){
@@ -5986,7 +6750,11 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
   function renderSettingsProfiles(){
     const el=document.getElementById("stprofs"); if(!el)return;
     const profileKeys=isAdminUser() ? Object.keys(PROFILES) : [activeProfile];
-    const list=profileKeys.map(k=>{ const p=PROFILES[k],a=k===activeProfile; return `<button class="prof-btn ${a?'pa':''}" style="${a?'border-color:'+p.color+';color:'+p.color:''}" onclick="${isAdminUser()?`switchProfile('${k}')`:'void(0)'}">${p.label}</button>`; }).join('');
+    const list=profileKeys.map(k=>{
+      const p=PROFILES[k],a=k===activeProfile;
+      const premiumTag=isPremiumProfile(k)?` <span style="font-size:.72em;opacity:.9">★</span>`:"";
+      return `<button class="prof-btn ${a?'pa':''}" style="${a?'border-color:'+p.color+';color:'+p.color:''}" onclick="${isAdminUser()?`switchProfile('${k}')`:'void(0)'}">${p.label}${premiumTag}</button>`;
+    }).join('');
     el.innerHTML=`${list}<button class="prof-btn" onclick="signOutAccount()">SIGN OUT</button>`;
   }
   window.setManagementTab=function(tab){
@@ -6005,8 +6773,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       bodyEl.innerHTML=`<section class="mg-panel">
         <div class="mg-panel-head">
           <div class="mg-panel-meta">${items.length} WORKOUT DAY${items.length===1?'':'S'}</div>
-          <button class="st-ab st-ab-accent st-ab-inline" onclick="closeSettings();setTimeout(()=>openAddDay(),60)">+ ADD WORKOUT DAY</button>
+          <div class="mg-action-row">
+            <button class="st-ab st-ab-accent st-ab-inline" onclick="closeSettings();setTimeout(()=>openAddDay(),60)">+ ADD WORKOUT DAY</button>
+            <button class="st-ab st-ab-inline" onclick="applyGlobalTemplate()">IMPORT TEMPLATE</button>
+          </div>
         </div>
+        <div class="mg-panel-subtitle">GLOBAL TEMPLATE LIBRARY (${remoteTemplates.length})</div>
+        <div class="mg-exercise-list">${remoteTemplates.length ? remoteTemplates.map(t=>`<button class="mg-exercise-pill" onclick="applyGlobalTemplate()">${escHtml(t.title || t.id || "Template")}</button>`).join("") : `<div class="mg-empty">No global templates loaded.</div>`}</div>
         <div class="mg-workout-list">` + (items.length?items.map(k=>{
         const d=WORKOUT_PLAN[k];
         const index = items.indexOf(k);
@@ -6031,6 +6804,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
         <div class="mg-action-row">
           <button class="st-ab st-ab-accent" onclick="saveExerciseMetaFromEditor()">SAVE EXERCISE ATTRIBUTES</button>
           <button class="st-ab" onclick="clearExerciseMetaFromEditor()">CLEAR OVERRIDE</button>
+          <button class="st-ab" onclick="syncExerciseCatalogFromBackend()">SYNC CATALOG</button>
         </div>
         <div class="mg-panel-subtitle">CURRENT EXERCISES</div>
         <div class="mg-exercise-list">
@@ -6054,6 +6828,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
           <div><div class="auth-field-label">WATER TARGET (L)</div><input id="mgu-${pk}-water" class="fi" type="number" step="0.1" min="1" max="8" placeholder="e.g. 2.5" value="${p.water||''}"></div>
           <div><div class="auth-field-label">PROTEIN TARGET (G)</div><input id="mgu-${pk}-protein" class="fi" type="number" min="20" max="400" placeholder="e.g. 160" value="${p.protein||''}"></div>
           <div><div class="auth-field-label">WEIGH-IN MODE</div><select id="mgu-${pk}-weigh-mode" class="fsel"><option value="daily" ${(p.weighMode||'daily')==='daily'?'selected':''}>DAILY</option><option value="weekly" ${(p.weighMode||'daily')==='weekly'?'selected':''}>WEEKLY</option></select></div>
+          <div><div class="auth-field-label">PREMIUM ACCESS</div><select id="mgu-${pk}-premium" class="fsel"><option value="1" ${isPremiumProfile(pk)?'selected':''}>ENABLED</option><option value="0" ${!isPremiumProfile(pk)?'selected':''}>DISABLED</option></select></div>
         </div>
         <div class="mg-action-row">
           <button class="st-ab st-ab-accent" onclick="saveUserOverridesFromEditor('${pk}')">SAVE ${p.label}</button>
@@ -6087,9 +6862,46 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const description=(document.getElementById("mgx-note")?.value||"").trim();
     if(!state.exerciseMeta) state.exerciseMeta={};
     state.exerciseMeta[key]={ muscleGroup: group, description };
+    try{
+      const callable=httpsCallable(functionsClient, "upsertExerciseCatalogItem");
+      await callable({
+        name,
+        muscleGroup: group,
+        instructions: description
+      });
+    }catch(err){
+      console.warn("[IronLog] upsertExerciseCatalogItem failed:", err);
+    }
     await saveData();
     renderPersonalRecordsWall();
     toast(`✓ Saved attributes for ${name}`);
+  };
+  window.syncExerciseCatalogFromBackend=async function(){
+    if(!auth?.currentUser){
+      toast("Sign in required");
+      return;
+    }
+    try{
+      const callable=httpsCallable(functionsClient, "listExerciseCatalog");
+      const result=await callable({});
+      const items=Array.isArray(result?.data?.items)?result.data.items:[];
+      if(!state.exerciseMeta) state.exerciseMeta={};
+      items.forEach(item=>{
+        const k=normalizeExerciseName(item?.name || item?.id || "");
+        if(!k) return;
+        state.exerciseMeta[k]={
+          muscleGroup: String(item?.muscleGroup || state.exerciseMeta[k]?.muscleGroup || "other"),
+          description: String(item?.instructions || state.exerciseMeta[k]?.description || "")
+        };
+      });
+      await saveData();
+      renderManagement();
+      toast(`Synced ${items.length} exercise catalog item${items.length===1?"":"s"}`);
+      trackEvent("exercise_catalog_synced", { count: items.length, env: ENVIRONMENT });
+    }catch(err){
+      console.warn("[IronLog] listExerciseCatalog failed:", err);
+      toast("Exercise catalog sync failed");
+    }
   };
   window.clearExerciseMetaFromEditor=async function(){
     const name=(document.getElementById("mgx-name")?.value||"").trim();
@@ -6107,6 +6919,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const water=parseFloat(document.getElementById(`mgu-${pk}-water`)?.value||0);
     const protein=parseFloat(document.getElementById(`mgu-${pk}-protein`)?.value||0);
     const weighMode=((document.getElementById(`mgu-${pk}-weigh-mode`)?.value||"daily")==="weekly")?"weekly":"daily";
+    const premiumEnabled=String(document.getElementById(`mgu-${pk}-premium`)?.value||"0")==="1";
     const cur=state.userOverrides[pk]||{};
     state.userOverrides[pk]={
       ...cur,
@@ -6116,12 +6929,19 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
       ...(protein>0?{protein}:{}),
       weighMode
     };
+    premiumProfiles = { ...(premiumProfiles||{}), [pk]: premiumEnabled };
+    try{
+      const callable=httpsCallable(functionsClient, "setProfilePremiumEntitlement");
+      await callable({ profileKey: pk, premium: premiumEnabled });
+    }catch(err){
+      console.warn("[IronLog] setProfilePremiumEntitlement failed, keeping local/shared save path", err);
+    }
     applyUserOverrides(state.userOverrides);
     updateLogoColor();
     renderSettingsProfiles();
     renderManagement();
     await saveData();
-    toast(`✓ ${PROFILES[pk].label} updated`);
+    toast(`✓ ${PROFILES[pk].label} updated${premiumEnabled?" (premium)":" (free)"}`);
   };
   window.deleteUserAccount=async function(pk){
     if(!canManageWorkoutParticipants()){
@@ -6149,6 +6969,22 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     renderSettingsProfiles();
     renderManagement();
     toast(`🗑 Deleted ${name}`);
+  };
+  window.togglePublicProfile=async function(enabled){
+    const next = !!enabled;
+    try{
+      localStorage.setItem("ironlog_public_profile", next ? "1" : "0");
+    }catch(_e){}
+    try{
+      const callable=httpsCallable(functionsClient, "setPublicProfile");
+      await callable({ enabled: next });
+      await pushUserPreferences();
+      trackEvent("public_profile_toggled", { enabled: next, env: ENVIRONMENT });
+      toast(next ? "🌐 Public profile enabled" : "🔒 Public profile disabled");
+    }catch(err){
+      console.warn("[IronLog] setPublicProfile failed:", err);
+      toast("⚠️ Could not update public profile");
+    }
   };
   window.setTheme=function(t){ if(t==="light")document.documentElement.classList.add("light-mode"); else document.documentElement.classList.remove("light-mode"); localStorage.setItem("ironlog_theme",t); };
 
@@ -6253,6 +7089,18 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(shouldSuggestDeload()){
       list.push({id:`deload_${today}`,type:"recovery",title:"Deload suggested",detail:"High fatigue signals detected (sleep/soreness/adherence). Consider a light day."});
     }
+    (Array.isArray(remoteNotifications)?remoteNotifications:[]).forEach(item=>{
+      const id=String(item.id||"").trim();
+      if(!id) return;
+      list.push({
+        id:`remote_${id}`,
+        remoteId:id,
+        type:String(item.type||"remote"),
+        title:String(item.title||"Notification"),
+        detail:String(item.detail||""),
+        seen:!!item.seen
+      });
+    });
     return list;
   }
   function renderNotifications(){
@@ -6260,7 +7108,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     const badge=document.getElementById("notif-badge");
     if(!box||!badge) return;
     const items=getNotifications();
-    const unseen=items.filter(n=>!notificationsSeen[n.id]).length;
+    const unseen=items.filter(n=>(n.seen!==true) && !notificationsSeen[n.id]).length;
     badge.style.display=unseen>0?"inline-flex":"none";
     badge.textContent=String(unseen);
     box.innerHTML=items.length?items.map(n=>`<div class="noti-item"><div class="noti-title">${escHtml(n.title)}</div><div class="noti-detail">${escHtml(n.detail)}</div></div>`).join(""):`<div class="noti-empty">No notifications</div>`;
@@ -6271,9 +7119,13 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
     if(!p) return;
     p.style.display=notificationsOpen?"block":"none";
     if(notificationsOpen){
+      loadRemoteNotifications().then(()=>renderNotifications());
       const items=getNotifications();
       items.forEach(n=>{ notificationsSeen[n.id]=true; });
       try{ localStorage.setItem(`ironlog_notif_seen_${activeProfile}`,JSON.stringify(notificationsSeen)); }catch(_e){}
+      const remoteIds=items.map(n=>n.remoteId).filter(Boolean);
+      markRemoteNotificationsSeen(remoteIds);
+      remoteNotifications = (Array.isArray(remoteNotifications)?remoteNotifications:[]).map(n=>({ ...n, seen:true }));
     }
     renderNotifications();
   };
